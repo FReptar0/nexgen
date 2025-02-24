@@ -45,9 +45,17 @@ async function main() {
             }
         });
 
+        // Directorio de salida específico
+        const outputDir = "C:\\Directorio_de_Trabajo\\NEO\\Taxes\\respuesta";
+        
+        // Asegurarse de que el directorio de salida exista, si no, crearlo
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
         // Crear el nombre del archivo de respuesta
         const originalName = path.basename(filePath);
-        const responseFileName = 'RESPONSE_' + originalName;
+        const responseFileName = path.join(outputDir, 'RESPONSE_' + originalName);
 
         // Escribir la respuesta en el archivo
         fs.writeFileSync(responseFileName, JSON.stringify(response.data, null, 2));
