@@ -1,7 +1,8 @@
 // index.js
-require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
+// Carga el archivo .env que se encuentra en el mismo directorio que index.js
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+const fs = require('fs');
 const axios = require('axios');
 const notifier = require('node-notifier'); // Importamos node-notifier
 
