@@ -4,17 +4,12 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const fs = require('fs');
 const axios = require('axios');
-const notifier = require('node-notifier'); // Importamos node-notifier
 
 async function main() {
     const args = process.argv.slice(2);
     if (args.length < 2) {
         const message = 'Uso: node index.js <operacion> <ruta_del_archivo>\nOperaciones válidas: "get_tax", "post_tax" o "cancel_tax"';
         console.error(message);
-        notifier.notify({
-            title: 'Error: Parámetros insuficientes',
-            message: message
-        });
         process.exit(1);
     }
 
@@ -28,10 +23,6 @@ async function main() {
     } catch (err) {
         const errorMsg = `Error al leer o parsear el archivo: ${err.message}`;
         console.error(errorMsg);
-        notifier.notify({
-            title: 'Error al leer archivo',
-            message: errorMsg
-        });
         process.exit(1);
     }
 
@@ -40,20 +31,12 @@ async function main() {
         if (requestBody.Committed !== false) {
             const errorMsg = 'Para la operación get_tax, el valor "Committed" debe ser false.';
             console.error(errorMsg);
-            notifier.notify({
-                title: 'Error en get_tax',
-                message: errorMsg
-            });
             process.exit(1);
         }
     } else if (operation === 'post_tax') {
         if (requestBody.Committed !== true) {
             const errorMsg = 'Para la operación post_tax, el valor "Committed" debe ser true.';
             console.error(errorMsg);
-            notifier.notify({
-                title: 'Error en post_tax',
-                message: errorMsg
-            });
             process.exit(1);
         }
     }
@@ -63,10 +46,6 @@ async function main() {
     if (!baseUrl) {
         const errorMsg = 'No se ha definido BASE_URL en el archivo .env';
         console.error(errorMsg);
-        notifier.notify({
-            title: 'Error en configuración',
-            message: errorMsg
-        });
         process.exit(1);
     }
 
@@ -77,10 +56,6 @@ async function main() {
         if (!apiCode) {
             const errorMsg = 'No se ha definido API_CODE en el archivo .env';
             console.error(errorMsg);
-            notifier.notify({
-                title: 'Error en configuración',
-                message: errorMsg
-            });
             process.exit(1);
         }
         url = `${baseUrl}MGGetTaxForCart?code=${apiCode}`;
@@ -89,10 +64,6 @@ async function main() {
     } else {
         const errorMsg = 'Operación inválida. Usa "get_tax", "post_tax" o "cancel_tax".';
         console.error(errorMsg);
-        notifier.notify({
-            title: 'Operación inválida',
-            message: errorMsg
-        });
         process.exit(1);
     }
 
@@ -112,10 +83,6 @@ async function main() {
         if (!outputDir) {
             const errorMsg = 'No se ha definido OUTPUT_DIR en el archivo .env';
             console.error(errorMsg);
-            notifier.notify({
-                title: 'Error en configuración',
-                message: errorMsg
-            });
             process.exit(1);
         }
 
@@ -132,17 +99,9 @@ async function main() {
         fs.writeFileSync(responseFileName, JSON.stringify(response.data, null, 2));
         const successMsg = 'Respuesta escrita en ' + responseFileName;
         console.log(successMsg);
-        notifier.notify({
-            title: 'Éxito',
-            message: successMsg
-        });
     } catch (error) {
         const errorMsg = `Error en la petición: ${error.message}`;
         console.error(errorMsg);
-        notifier.notify({
-            title: 'Error en la petición',
-            message: errorMsg
-        });
     }
 }
 
