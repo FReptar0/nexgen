@@ -4,12 +4,39 @@ const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 const fs = require('fs');
 const axios = require('axios');
+const winston = require('winston');
+
+// Configuración de winston para logs diarios de errores
+const logDir = path.resolve(__dirname, 'logs');
+if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+}
+const logger = winston.createLogger({
+    level: 'error',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf(({ timestamp, level, message }) => {
+            return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.File({
+            filename: path.join(logDir, `log_${new Date().toISOString().slice(0, 10)}.log`),
+            level: 'error',
+        })
+    ]
+});
+
+function logError(message) {
+    logger.error(message);
+}
 
 async function main() {
     const args = process.argv.slice(2);
     if (args.length < 2) {
         const message = 'Uso: node index.js <operacion> <ruta_del_archivo>\nOperaciones válidas: "get_tax", "post_tax" o "cancel_tax"';
         console.error(message);
+        logError(message);
         process.exit(1);
     }
 
@@ -23,6 +50,7 @@ async function main() {
     } catch (err) {
         const errorMsg = `Error al leer o parsear el archivo: ${err.message}`;
         console.error(errorMsg);
+        logError(errorMsg);
         process.exit(1);
     }
 
@@ -31,12 +59,14 @@ async function main() {
         if (requestBody.Committed !== false) {
             const errorMsg = 'Para la operación get_tax, el valor "Committed" debe ser false.';
             console.error(errorMsg);
+            logError(errorMsg);
             process.exit(1);
         }
     } else if (operation === 'post_tax') {
         if (requestBody.Committed !== true) {
             const errorMsg = 'Para la operación post_tax, el valor "Committed" debe ser true.';
             console.error(errorMsg);
+            logError(errorMsg);
             process.exit(1);
         }
     }
@@ -46,6 +76,7 @@ async function main() {
     if (!baseUrl) {
         const errorMsg = 'No se ha definido BASE_URL en el archivo .env';
         console.error(errorMsg);
+        logError(errorMsg);
         process.exit(1);
     }
 
@@ -56,6 +87,7 @@ async function main() {
         if (!apiCode) {
             const errorMsg = 'No se ha definido API_CODE en el archivo .env';
             console.error(errorMsg);
+            logError(errorMsg);
             process.exit(1);
         }
         url = `${baseUrl}MGGetTaxForCart?code=${apiCode}`;
@@ -64,6 +96,7 @@ async function main() {
     } else {
         const errorMsg = 'Operación inválida. Usa "get_tax", "post_tax" o "cancel_tax".';
         console.error(errorMsg);
+        logError(errorMsg);
         process.exit(1);
     }
 
@@ -83,6 +116,7 @@ async function main() {
         if (!outputDir) {
             const errorMsg = 'No se ha definido OUTPUT_DIR en el archivo .env';
             console.error(errorMsg);
+            logError(errorMsg);
             process.exit(1);
         }
 
@@ -102,6 +136,7 @@ async function main() {
     } catch (error) {
         const errorMsg = `Error en la petición: ${error.message}`;
         console.error(errorMsg);
+        logError(errorMsg);
     }
 }
 
