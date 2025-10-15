@@ -43,13 +43,74 @@ async function main() {
     const operation = args[0];
     const filePath = args[1];
 
+    // Validar que el archivo existe antes de intentar leerlo
+    if (!fs.existsSync(filePath)) {
+        const errorMsg = `El archivo no existe en la ruta especificada: ${filePath}`;
+        console.error(errorMsg);
+        logError(errorMsg);
+        
+        // Intentar listar el directorio para diagnóstico
+        try {
+            const dir = path.dirname(filePath);
+            const fileName = path.basename(filePath);
+            console.log(`Buscando archivo: ${fileName}`);
+            console.log(`En directorio: ${dir}`);
+            
+            if (fs.existsSync(dir)) {
+                const files = fs.readdirSync(dir);
+                console.log(`Archivos encontrados en el directorio:`);
+                files.forEach(file => console.log(`  - ${file}`));
+                
+                // Buscar archivos similares
+                const similarFiles = files.filter(file => 
+                    file.toLowerCase().includes('sage') || 
+                    file.toLowerCase().includes('tax') ||
+                    file.includes('ORD') ||
+                    file.endsWith('.json')
+                );
+                
+                if (similarFiles.length > 0) {
+                    console.log(`Archivos similares encontrados:`);
+                    similarFiles.forEach(file => console.log(`  - ${file}`));
+                }
+            } else {
+                console.log(`El directorio ${dir} no existe`);
+            }
+        } catch (listErr) {
+            console.log(`No se pudo listar el directorio: ${listErr.message}`);
+        }
+        
+        process.exit(1);
+    }
+
     // Leer y parsear el archivo JSON de entrada
     let requestBody;
     try {
-        requestBody = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        console.log(`Intentando leer archivo: ${filePath}`);
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        console.log(`Archivo leído exitosamente. Tamaño: ${fileContent.length} caracteres`);
+        
+        requestBody = JSON.parse(fileContent);
+        console.log(`JSON parseado exitosamente`);
     } catch (err) {
         const errorMsg = `Error al leer o parsear el archivo: ${err.message}`;
         console.error(errorMsg);
+        console.error(`Código de error: ${err.code}`);
+        console.error(`Ruta del archivo: ${filePath}`);
+        
+        // Información adicional del error
+        if (err.code === 'ENOENT') {
+            console.error('El archivo no fue encontrado. Verifique:');
+            console.error('1. Que la ruta del archivo sea correcta');
+            console.error('2. Que tenga permisos de lectura');
+            console.error('3. Que el archivo no esté siendo usado por otro proceso');
+            console.error('4. Que no haya caracteres especiales en el nombre');
+        } else if (err.code === 'EACCES') {
+            console.error('Sin permisos para leer el archivo');
+        } else if (err.name === 'SyntaxError') {
+            console.error('El archivo no contiene JSON válido');
+        }
+        
         logError(errorMsg);
         process.exit(1);
     }
