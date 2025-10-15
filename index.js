@@ -162,6 +162,9 @@ async function main() {
     }
 
     try {
+        console.log(`Realizando petición ${operation.toUpperCase()} a: ${url}`);
+        console.log(`Enviando datos: ${JSON.stringify(requestBody, null, 2)}`);
+        
         // Se usa el método GET para todas las operaciones, según lo requerido.
         const response = await axios({
             method: 'GET',
@@ -169,8 +172,29 @@ async function main() {
             data: requestBody,
             headers: {
                 'Content-Type': 'application/json'
+            },
+            timeout: 30000, // 30 segundos de timeout
+            validateStatus: function (status) {
+                // Considera exitosos todos los códigos de estado para manejarlos manualmente
+                return status < 500;
             }
         });
+
+        console.log(`Respuesta recibida - Status: ${response.status} ${response.statusText}`);
+        
+        // Si hay datos en la respuesta, mostrarlos siempre (éxito o error)
+        if (response.data) {
+            console.log('Respuesta del servidor:', JSON.stringify(response.data, null, 2));
+        }
+        
+        // Verificar si el servidor indica error mediante el status code
+        if (response.status >= 400) {
+            const serverErrorMsg = response.data ? JSON.stringify(response.data) : response.statusText;
+            const errorMsg = `Error HTTP ${response.status}: ${serverErrorMsg}`;
+            console.error(errorMsg);
+            logError(`${errorMsg} - URL: ${url} - Operation: ${operation}`);
+            process.exit(1);
+        }
 
         // Obtener el directorio de salida desde .env
         const outputDir = process.env.OUTPUT_DIR;
@@ -182,8 +206,16 @@ async function main() {
         }
 
         // Asegurarse de que el directorio de salida exista, si no, crearlo
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
+        try {
+            if (!fs.existsSync(outputDir)) {
+                fs.mkdirSync(outputDir, { recursive: true });
+                console.log(`Directorio de salida creado: ${outputDir}`);
+            }
+        } catch (dirErr) {
+            const errorMsg = `Error al crear el directorio de salida: ${dirErr.message}`;
+            console.error(errorMsg);
+            logError(errorMsg);
+            process.exit(1);
         }
 
         // Crear el nombre del archivo de respuesta con el prefijo RESPONSE_
@@ -191,13 +223,69 @@ async function main() {
         const responseFileName = path.join(outputDir, 'RESPONSE_' + originalName);
 
         // Escribir la respuesta en el archivo
-        fs.writeFileSync(responseFileName, JSON.stringify(response.data, null, 2));
-        const successMsg = 'Respuesta escrita en ' + responseFileName;
-        console.log(successMsg);
+        try {
+            fs.writeFileSync(responseFileName, JSON.stringify(response.data, null, 2));
+            const successMsg = `Operación ${operation} completada exitosamente. Respuesta guardada en: ${responseFileName}`;
+            console.log(successMsg);
+            
+            // Log de éxito también
+            const successLogMsg = `SUCCESS: ${operation} - File: ${originalName} - Status: ${response.status}`;
+            console.log(successLogMsg);
+            
+        } catch (writeErr) {
+            const errorMsg = `Error al escribir el archivo de respuesta: ${writeErr.message}`;
+            console.error(errorMsg);
+            console.error(`Ruta de destino: ${responseFileName}`);
+            logError(errorMsg);
+            process.exit(1);
+        }
+        
     } catch (error) {
-        const errorMsg = `Error en la petición: ${error.message}`;
-        console.error(errorMsg);
-        logError(errorMsg);
+        let errorMsg = 'Error en la petición: ';
+        
+        if (error.code === 'ECONNREFUSED') {
+            errorMsg += 'Conexión rechazada. El servidor no está disponible o la URL es incorrecta.';
+            console.error(errorMsg);
+            console.error(`URL intentada: ${url}`);
+            console.error('Verifique que:');
+            console.error('1. El servidor esté en funcionamiento');
+            console.error('2. La BASE_URL en .env sea correcta');
+            console.error('3. No hay firewall bloqueando la conexión');
+        } else if (error.code === 'ECONNABORTED') {
+            errorMsg += 'Timeout de conexión. La petición tardó más de 30 segundos.';
+            console.error(errorMsg);
+        } else if (error.code === 'ENOTFOUND') {
+            errorMsg += 'Servidor no encontrado. Verifique la URL en BASE_URL.';
+            console.error(errorMsg);
+            console.error(`URL: ${url}`);
+        } else if (error.response) {
+            // Error con respuesta del servidor - usar exactamente lo que regresa el servidor
+            const serverResponse = error.response.data || error.response.statusText;
+            errorMsg += `HTTP ${error.response.status}`;
+            console.error(errorMsg);
+            console.error(`URL: ${url}`);
+            console.error('Mensaje del servidor:', JSON.stringify(serverResponse, null, 2));
+        } else if (error.request) {
+            // Error de red sin respuesta
+            errorMsg += 'No se recibió respuesta del servidor (problema de conectividad)';
+            console.error(errorMsg);
+        } else {
+            // Otro tipo de error
+            errorMsg += error.message;
+            console.error(errorMsg);
+        }
+        
+        // Log detallado del error
+        const detailedLog = `${errorMsg} - Operation: ${operation} - URL: ${url} - File: ${filePath}`;
+        logError(detailedLog);
+        
+        console.error('\n--- Información de diagnóstico ---');
+        console.error(`Operación: ${operation}`);
+        console.error(`Archivo: ${filePath}`);
+        console.error(`URL: ${url}`);
+        console.error(`Timestamp: ${new Date().toISOString()}`);
+        
+        process.exit(1);
     }
 }
 
