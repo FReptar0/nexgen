@@ -151,7 +151,11 @@ async function main() {
             logError(errorMsg);
             process.exit(1);
         }
-        url = `${baseUrl}MGGetTaxForCart?code=${apiCode}`;
+        
+        // Determinar si está en modo de prueba
+        const isTestMode = process.env.TEST_MODE === 'true';
+        const endpoint = isTestMode ? 'STCCalcV3_TEST' : 'MGGetTaxForCart';
+        url = `${baseUrl}${endpoint}?code=${apiCode}`;
     } else if (operation === 'cancel_tax') {
         url = `${baseUrl}CancelTransaction`;
     } else {
