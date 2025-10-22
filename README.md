@@ -2,6 +2,8 @@
 
 A Node.js application for interacting with the Magento Tax API to calculate, commit, and cancel tax transactions.
 
+**Architecture**: Layered Architecture with SOLID principles. See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed technical documentation.
+
 ## Requirements
 
 - Node.js (version 14 or higher)
@@ -33,6 +35,7 @@ Create a `.env` file in the root directory with the following variables:
 BASE_URL=https://syn-magento.azurewebsites.net/api/
 API_CODE=ABC123XYZ456DEFG789HIJK0LMNOPQRS==
 OUTPUT_DIR=C:\Directorio_de_Trabajo\NEO\Taxes\respuesta
+TEST_MODE=false
 ```
 
 ### Environment Variables Explained
@@ -40,6 +43,7 @@ OUTPUT_DIR=C:\Directorio_de_Trabajo\NEO\Taxes\respuesta
 - **BASE_URL**: The base URL for the Magento Tax API
 - **API_CODE**: Authentication code for accessing the tax calculation endpoints
 - **OUTPUT_DIR**: Directory where response files will be saved (will be created automatically if it doesn't exist)
+- **TEST_MODE**: Set to `true` to use test endpoint (`STCCalcV3_TEST`), `false` for production endpoint (`MGGetTaxForCart`)
 
 ## Usage
 
@@ -106,3 +110,50 @@ The application validates:
 - API response handling
 
 All errors are logged both to console and log files for debugging purposes.
+
+## Project Structure
+
+```tree
+nexgen/
+├── index.js                          # Entry point with dependency injection
+├── src/
+│   ├── cli/                          # CLI interface layer
+│   ├── validators/                   # Business rules validation
+│   ├── api/                          # HTTP API client
+│   ├── storage/                      # File system operations
+│   ├── infrastructure/               # Logging and cross-cutting concerns
+│   └── config/                       # Configuration management
+├── logs/                             # Application logs
+├── .env                              # Environment variables
+├── package.json                      # Project metadata and dependencies
+├── package-lock.json                 # Exact dependency versions
+└── README.md                         # This documentation
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Coming soon - test suite with Jest
+npm test
+```
+
+### Code Structure
+
+Each layer is independent and testable:
+
+- **CLI Layer**: Command parsing and orchestration
+- **Validation Layer**: Business rules and data validation
+- **API Layer**: HTTP communication with tax API
+- **Storage Layer**: File operations
+- **Infrastructure**: Logging, configuration
+
+## Contributing
+
+When adding new features:
+
+1. Follow the layered architecture pattern
+2. Apply SOLID principles
+3. Add appropriate error handling
+4. Update tests and documentation
