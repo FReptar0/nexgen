@@ -2,8 +2,6 @@
 
 A Node.js application for interacting with the Magento Tax API to calculate, commit, and cancel tax transactions.
 
-**Architecture**: Layered Architecture with SOLID principles. See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed technical documentation.
-
 ## Requirements
 
 - Node.js (version 14 or higher)
@@ -153,7 +151,6 @@ Each layer is independent and testable:
 
 When adding new features:
 
-1. Follow the layered architecture pattern
-2. Apply SOLID principles
-3. Add appropriate error handling
-4. Update tests and documentation
+1. Apply SOLID principles
+2. Add appropriate error handling
+3. Update tests and documentation
