@@ -67,7 +67,7 @@ class Config {
 
         if (operation === 'get_tax' || operation === 'post_tax') {
             const apiCode = this.getApiCode();
-            const endpoint = this.isTestMode() ? 'STCCalcV3_TEST' : 'MGGetTaxForCart';
+            const endpoint = this.isTestMode() ? 'STCCalcV3_TEST' : 'STCCalcV3';
             return `${baseUrl}${endpoint}?code=${apiCode}`;
         }
 
