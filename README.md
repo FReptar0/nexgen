@@ -41,7 +41,7 @@ TEST_MODE=false
 - **BASE_URL**: The base URL for the Magento Tax API
 - **API_CODE**: Authentication code for accessing the tax calculation endpoints
 - **OUTPUT_DIR**: Directory where response files will be saved (will be created automatically if it doesn't exist)
-- **TEST_MODE**: Set to `true` to use test endpoint (`STCCalcV3_TEST`), `false` for production endpoint (`MGGetTaxForCart`)
+- **TEST_MODE**: Set to `true` to use test endpoint (`STCCalcV3_TEST`), `false` for production endpoint (`STCCalcV3`)
 
 ## Usage
 

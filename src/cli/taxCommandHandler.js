@@ -69,11 +69,11 @@ class TaxCommandHandler {
             // 4. Leer y parsear el archivo JSON
             const requestBody = this.fileManager.readJsonFile(filePath);
 
-            // 5. Validar el cuerpo de la petición y el campo Committed
-            this.validator.validate(operation, requestBody);
+            // 5. Validar el cuerpo de la petición y el campo Committed, obtener datos sanitizados
+            const sanitizedRequestBody = this.validator.validate(operation, requestBody);
 
-            // 6. Realizar la petición a la API
-            const responseData = await this.apiClient.makeRequest(operation, requestBody);
+            // 6. Realizar la petición a la API con los datos sanitizados
+            const responseData = await this.apiClient.makeRequest(operation, sanitizedRequestBody);
 
             // 7. Preparar y guardar la respuesta
             await this._saveResponse(responseData, filePath);

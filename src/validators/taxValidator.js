@@ -69,14 +69,45 @@ class TaxValidator {
     }
 
     /**
+     * Sanitiza campos de texto para evitar problemas con caracteres especiales
+     * @param {Object} requestBody - Cuerpo de la petición
+     * @returns {Object} Objeto sanitizado
+     */
+    sanitizeStringFields(requestBody) {
+        try {
+            // Recursivamente sanitiza todos los campos de string
+            const sanitized = JSON.parse(JSON.stringify(requestBody, (key, value) => {
+                if (typeof value === 'string') {
+                    // Escapar apostrofes que pueden causar problemas en la transmisión
+                    return value.replace(/'/g, "\\'");
+                }
+                return value;
+            }));
+            
+            console.log('Datos sanitizados exitosamente');
+            return sanitized;
+        } catch (err) {
+            const errorMsg = `Error al sanitizar los datos: ${err.message}`;
+            console.error(errorMsg);
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+    }
+
+    /**
      * Valida todos los aspectos de una operación de impuestos
      * @param {string} operation - Operación a realizar
      * @param {Object} requestBody - Cuerpo de la petición
+     * @returns {Object} Objeto validado y sanitizado
      */
     validate(operation, requestBody) {
         this.validateOperation(operation);
         this.validateRequestBody(requestBody);
         this.validateCommittedField(operation, requestBody);
+        
+        // Sanitizar los datos antes de enviarlos
+        const sanitizedData = this.sanitizeStringFields(requestBody);
+        return sanitizedData;
     }
 
     /**
