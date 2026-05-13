@@ -2,6 +2,16 @@
 
 A Node.js application for interacting with the Magento Tax API to calculate, commit, and cancel tax transactions.
 
+## Handoff
+
+This project is being handed off to a new owner. Start with these documents (in order):
+
+1. [HANDOFF.md](./HANDOFF.md) — owner-to-owner brief (Spanish): what nexgen is, current state, deuda técnica, FAQ.
+2. [ARCHITECTURE.md](./ARCHITECTURE.md) — per-layer codebase map (English).
+3. [RUNBOOK.md](./RUNBOOK.md) — operational procedures (Spanish).
+4. [docs/MEMORY.md](./docs/MEMORY.md) — historical decisions and conventions (Spanish).
+5. [CLAUDE.md](./CLAUDE.md) — persistent instructions for Claude Code sessions.
+
 ## Requirements
 
 - Node.js (version 14 or higher)
