@@ -27,6 +27,7 @@ const FileManager = require('./src/storage/fileManager');
 const TaxValidator = require('./src/validators/taxValidator');
 const TaxApiClient = require('./src/api/taxApiClient');
 const SynexusRequestBuilder = require('./src/api/synexusRequestBuilder');
+const SynexusApiClient = require('./src/api/synexusApiClient');
 const SynexusConfig = require('./src/config/synexusConfig');
 const TaxCommandHandler = require('./src/cli/taxCommandHandler');
 
@@ -49,14 +50,18 @@ async function main() {
         const apiClient = new TaxApiClient(config, logger);
         const requestBuilder = new SynexusRequestBuilder(logger);
 
-        // 5. Resolver el contrato y construir la configuración v2 sólo si se seleccionó v2.
-        //    Bajo v1 queda en null: un servidor sin variables de v2 nunca dispara sus frenos.
-        //    Requerir SynexusConfig arriba es seguro porque exporta la clase, no una instancia.
+        // 5. Resolver el contrato y construir la configuración y el cliente v2 sólo si se
+        //    seleccionó v2. Bajo v1 quedan en null: un servidor sin variables de v2 nunca
+        //    dispara sus frenos, y la guardia de _executeV2 convierte un cableado roto en
+        //    un mensaje claro. Requerir SynexusConfig arriba es seguro porque exporta la
+        //    clase, no una instancia.
         const args = process.argv.slice(2);
         const apiVersion = TaxCommandHandler.resolveApiVersion(args, config, logger);
         let synexusConfig = null;
+        let synexusApiClient = null;
         if (apiVersion === 'v2') {
             synexusConfig = new SynexusConfig();
+            synexusApiClient = new SynexusApiClient(synexusConfig, logger);
         }
 
         // 6. Inicializar capa CLI (capa más alta)
@@ -67,7 +72,8 @@ async function main() {
             validator,
             apiClient,
             synexusConfig,
-            requestBuilder
+            requestBuilder,
+            synexusApiClient
         );
 
         // 7. Ejecutar el comando

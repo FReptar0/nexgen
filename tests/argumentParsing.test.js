@@ -40,11 +40,13 @@ describe('Selector de contrato — parseArguments y resolveApiVersion (CFG-03, C
     let logger;
 
     beforeEach(() => {
-        // parseArguments no usa fileManager, validator, apiClient ni synexusConfig.
-        // El Config es el real: así getApiVersion se prueba de verdad, no un doble.
+        // parseArguments no usa fileManager, validator, apiClient, synexusConfig,
+        // requestBuilder ni synexusApiClient: los ocho colaboradores se pasan, pero
+        // seis son objetos vacíos. El Config es el real: así getApiVersion se
+        // prueba de verdad, no un doble.
         delete process.env.TAX_API_VERSION;
         logger = fakes.createFakeLogger();
-        handler = new TaxCommandHandler(config, logger, {}, {}, {}, {});
+        handler = new TaxCommandHandler(config, logger, {}, {}, {}, {}, {}, {});
     });
 
     it('sin TAX_API_VERSION y sin flags resuelve v1 — es la invocación del envoltorio del ERP', () => {
@@ -177,9 +179,11 @@ describe('Ramificación de execute() por contrato — antes de la validación de
     /**
      * Arma el manejador con los dobles del caso y el validador real espiado.
      * @param {*} requestBody - Lo que readJsonFile devolverá
+     * @param {Object} [options] - synexusApiClient: reemplazo del doble del cliente v2 (null para probar la guardia)
      * @returns {Object} handler y colaboradores para las aserciones
      */
-    const buildHandler = (requestBody) => {
+    const buildHandler = (requestBody, options) => {
+        const settings = options || {};
         const validator = new TaxValidator(fakes.createFakeLogger());
         const spies = {
             validate: jest.spyOn(validator, 'validate'),
@@ -212,6 +216,13 @@ describe('Ramificación de execute() por contrato — antes de la validación de
                 request_id: '33333333-3333-4333-8333-333333333333'
             }))
         };
+        // Doble del cliente v2 (octavo colaborador desde el plan 01-04). Devuelve una
+        // respuesta con forma v2; lo que hace de verdad se prueba en
+        // tests/synexusApiClient.test.js y tests/v2QuoteEndToEnd.test.js. Con
+        // options.synexusApiClient = null se prueba la guardia de cableado.
+        const synexusApiClient = settings.synexusApiClient !== undefined
+            ? settings.synexusApiClient
+            : { makeRequest: jest.fn(async () => ({ total_tax: '0.00' })) };
         const fakeConfig = fakes.createFakeConfig({ getApiVersion: jest.fn(() => 'v1') });
         const handler = new TaxCommandHandler(
             fakeConfig,
@@ -220,15 +231,16 @@ describe('Ramificación de execute() por contrato — antes de la validación de
             validator,
             apiClient,
             synexusConfig,
-            requestBuilder
+            requestBuilder,
+            synexusApiClient
         );
 
-        return { handler, spies, apiClient, synexusConfig, fileManager, requestBuilder };
+        return { handler, spies, apiClient, synexusConfig, fileManager, requestBuilder, synexusApiClient };
     };
 
     it('bajo v1 con cuerpo v1 conserva la secuencia de siempre: validate una vez y makeRequest con lo que validate devolvió', async () => {
         const body = createV1Body();
-        const { handler, spies, apiClient, synexusConfig } = buildHandler(body);
+        const { handler, spies, apiClient, synexusConfig, synexusApiClient } = buildHandler(body);
 
         await handler.execute(['get_tax', 'a.json']);
 
@@ -238,6 +250,7 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         expect(apiClient.makeRequest).toHaveBeenCalledWith('get_tax', spies.validate.mock.results[0].value);
         expect(synexusConfig.resolveEntityCode).not.toHaveBeenCalled();
         expect(synexusConfig.printProfile).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
     it('bajo v1 con cuerpo v2 (sin Committed) rechaza con el mensaje literal de v1 y no llama a la API (COMP-01)', async () => {
@@ -248,17 +261,13 @@ describe('Ramificación de execute() por contrato — antes de la validación de
     });
 
     it('bajo v2 con cuerpo v2 no rechaza con el mensaje de v1: validate y validateCommittedField tienen cero llamadas', async () => {
-        const { handler, spies, apiClient, synexusConfig } = buildHandler(createV2Body());
+        const { handler, spies, apiClient, synexusConfig, synexusApiClient } = buildHandler(createV2Body());
 
-        let caught = null;
-        try {
-            await handler.execute(['get_tax', 'a.json', '--api-version=v2']);
-        } catch (error) {
-            caught = error;
-        }
+        // Con el cliente v2 inyectado la corrida ya no rechaza: termina en el
+        // cliente v2, nunca en el de v1 ni en el mensaje de Committed.
+        await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).resolves.toBeUndefined();
 
-        expect(caught).not.toBeNull();
-        expect(caught.message).not.toBe(v1CommittedMessage);
+        expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
         expect(spies.validate).not.toHaveBeenCalled();
         expect(spies.validateCommittedField).not.toHaveBeenCalled();
         expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
@@ -272,11 +281,13 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         expect(apiClient.makeRequest).not.toHaveBeenCalled();
     });
 
-    it('bajo v2 la corrida termina en la guardia de cableado, porque el cliente v2 aún no existe', async () => {
-        const { handler } = buildHandler(createV2Body());
+    it('sin cliente v2 inyectado, la corrida termina en la guardia de cableado: defensa permanente contra un index.js incompleto', async () => {
+        const { handler, apiClient, fileManager } = buildHandler(createV2Body(), { synexusApiClient: null });
 
         await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('cliente v2');
         await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('index.js');
+        expect(apiClient.makeRequest).not.toHaveBeenCalled();
+        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 
     it('bajo v2 resolveEntityCode recibe el cuerpo SANEADO, con el apóstrofo escapado', async () => {
@@ -284,7 +295,7 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         body.customer_id = "Plummer's";
         const { handler, synexusConfig } = buildHandler(body);
 
-        await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).rejects.toThrow();
+        await handler.execute(['get_tax', 'a.json', '--api-version=v2']);
 
         const receivedBody = synexusConfig.resolveEntityCode.mock.calls[0][1];
         expect(receivedBody.customer_id).toBe("Plummer\\'s");
@@ -302,18 +313,20 @@ describe('Ramificación de execute() por contrato — antes de la validación de
     it('bajo v2 con --entity=USA resolveEntityCode recibe USA como primer argumento', async () => {
         const { handler, synexusConfig } = buildHandler(createV2Body());
 
-        await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2', '--entity=USA'])).rejects.toThrow();
+        await handler.execute(['get_tax', 'a.json', '--api-version=v2', '--entity=USA']);
 
         expect(synexusConfig.resolveEntityCode.mock.calls[0][0]).toBe('USA');
     });
 
     it('bajo TAX_API_VERSION=v2 (sin flag) también ramifica a v2', async () => {
-        const { handler, spies, synexusConfig } = buildHandler(createV2Body());
+        const { handler, spies, apiClient, synexusConfig, synexusApiClient } = buildHandler(createV2Body());
         handler.config.getApiVersion.mockReturnValue('v2');
 
-        await expect(handler.execute(['get_tax', 'a.json'])).rejects.toThrow('cliente v2');
+        await expect(handler.execute(['get_tax', 'a.json'])).resolves.toBeUndefined();
 
         expect(spies.validate).not.toHaveBeenCalled();
         expect(synexusConfig.printProfile).toHaveBeenCalledTimes(1);
+        expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+        expect(apiClient.makeRequest).not.toHaveBeenCalled();
     });
 });

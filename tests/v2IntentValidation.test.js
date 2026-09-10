@@ -5,8 +5,9 @@
 //      guardia de archivo v1, regla de contradicción (OPER-04 bajo v2) y el
 //      campo request_id como propiedad de nexgen.
 //   2. El recorrido de _executeV2 con el TaxValidator REAL: qué se llama, en
-//      qué orden, con qué argumentos, y qué NO se llama nunca (validate y
-//      validateCommittedField).
+//      qué orden, con qué argumentos, qué NO se llama nunca (validate y
+//      validateCommittedField), y que termina emitiendo con el cliente v2
+//      —o en la guardia de cableado si ese cliente no se inyectó.
 //
 // Ningún archivo de prueba requiere index.js (ejecuta main() al cargarse).
 const TaxValidator = require('../src/validators/taxValidator');
@@ -252,12 +253,16 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
 
     /**
      * Arma el manejador con el validador real espiado y dobles literales para
-     * el resto. requestBuilder es un doble con getIntentFor y buildRequestBody.
+     * el resto. requestBuilder es un doble con getIntentFor y buildRequestBody;
+     * synexusApiClient es un doble con makeRequest (octavo colaborador desde el
+     * plan 01-04), sustituible por null para probar la guardia de cableado.
      * @param {*} requestBody - Lo que readJsonFile devolverá
      * @param {Object} [builderOverrides] - Reemplazos para el doble del builder
+     * @param {Object} [options] - synexusApiClient: reemplazo del doble del cliente v2
      * @returns {Object} handler y colaboradores para las aserciones
      */
-    const buildHandler = (requestBody, builderOverrides) => {
+    const buildHandler = (requestBody, builderOverrides, options) => {
+        const settings = options || {};
         const validator = new TaxValidator(fakes.createFakeLogger());
         const spies = {
             validate: jest.spyOn(validator, 'validate'),
@@ -288,6 +293,9 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
                 request_id: '22222222-2222-4222-8222-222222222222'
             }))
         }, builderOverrides || {});
+        const synexusApiClient = settings.synexusApiClient !== undefined
+            ? settings.synexusApiClient
+            : { makeRequest: jest.fn(async () => ({ id: 'txn_1', total_tax: '0.00' })) };
         const handler = new TaxCommandHandler(
             fakes.createFakeConfig(),
             fakes.createFakeLogger(),
@@ -295,18 +303,19 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             validator,
             apiClient,
             synexusConfig,
-            requestBuilder
+            requestBuilder,
+            synexusApiClient
         );
 
-        return { handler, spies, apiClient, synexusConfig, requestBuilder };
+        return { handler, spies, apiClient, synexusConfig, requestBuilder, synexusApiClient, fileManager };
     };
 
     const runV2 = (handler) => handler.execute(['get_tax', 'a.json', '--api-version=v2']);
 
-    it('con un cuerpo v2 recorre la rama completa en el orden del contrato y se detiene en la guardia de cableado', async () => {
-        const { handler, spies, apiClient, synexusConfig, requestBuilder } = buildHandler(createV2Body());
+    it('con un cuerpo v2 recorre la rama completa en el orden del contrato y termina emitiendo con el cliente v2', async () => {
+        const { handler, spies, apiClient, synexusConfig, requestBuilder, synexusApiClient } = buildHandler(createV2Body());
 
-        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+        await expect(runV2(handler)).resolves.toBeUndefined();
 
         // Lo que NO se llama nunca bajo v2
         expect(spies.validate).not.toHaveBeenCalled();
@@ -321,8 +330,9 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.getIntentFor).toHaveBeenCalledTimes(1);
         expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
         expect(requestBuilder.buildRequestBody).toHaveBeenCalledTimes(1);
+        expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
 
-        // El orden: validar → sanear → entidad → perfil → intención → validar intención → construir
+        // El orden: validar → sanear → entidad → perfil → intención → validar intención → construir → emitir
         const order = [
             spies.validateRequestBody,
             spies.sanitizeStringFields,
@@ -330,16 +340,44 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             synexusConfig.printProfile,
             requestBuilder.getIntentFor,
             spies.validateV2IntentFields,
-            requestBuilder.buildRequestBody
+            requestBuilder.buildRequestBody,
+            synexusApiClient.makeRequest
         ].map(fn => fn.mock.invocationCallOrder[0]);
         const sorted = [...order].sort((a, b) => a - b);
         expect(order).toEqual(sorted);
     });
 
+    it('el cliente v2 recibe la operación, el MISMO cuerpo que devolvió buildRequestBody y la entidad resuelta', async () => {
+        const { handler, requestBuilder, synexusApiClient, fileManager } = buildHandler(createV2Body());
+
+        await expect(runV2(handler)).resolves.toBeUndefined();
+
+        const builtBody = requestBuilder.buildRequestBody.mock.results[0].value;
+        expect(synexusApiClient.makeRequest).toHaveBeenCalledWith('get_tax', builtBody, 'USA');
+        expect(synexusApiClient.makeRequest.mock.calls[0][1]).toBe(builtBody);
+
+        // Lo que devuelve el cliente viaja al paso 7 de execute sin transformarse
+        const providerResponse = await synexusApiClient.makeRequest.mock.results[0].value;
+        expect(fileManager.writeJsonFile).toHaveBeenCalledTimes(1);
+        expect(fileManager.writeJsonFile.mock.calls[0][1]).toBe(providerResponse);
+    });
+
+    it('sin cliente v2 inyectado, la rama recorre todo hasta la guardia de cableado y lanza su mensaje sin emitir nada', async () => {
+        const { handler, requestBuilder, apiClient, fileManager } = buildHandler(createV2Body(), {}, { synexusApiClient: null });
+
+        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+        // La guardia va DESPUÉS de construir: el cuerpo ya existe y se imprimió
+        expect(requestBuilder.buildRequestBody).toHaveBeenCalledTimes(1);
+        expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(true);
+        expect(apiClient.makeRequest).not.toHaveBeenCalled();
+        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+    });
+
     it('pasa al validador la operación, el cuerpo SANEADO y la MISMA intención que devolvió el builder', async () => {
         const { handler, spies, requestBuilder } = buildHandler(createV2Body());
 
-        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+        await expect(runV2(handler)).resolves.toBeUndefined();
 
         const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
         const intent = requestBuilder.getIntentFor.mock.results[0].value;
@@ -354,7 +392,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         rawBody.customer_id = "Plummer's";
         const { handler, spies, requestBuilder } = buildHandler(rawBody);
 
-        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+        await expect(runV2(handler)).resolves.toBeUndefined();
 
         const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
         expect(requestBuilder.buildRequestBody).toHaveBeenCalledWith('get_tax', sanitizedBody);
@@ -362,10 +400,10 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).toBe("Plummer\\'s");
     });
 
-    it('imprime el cuerpo construido en la salida estándar, con JSON indentado a dos espacios, antes de la guardia', async () => {
-        const { handler, requestBuilder } = buildHandler(createV2Body());
+    it('imprime el cuerpo construido en la salida estándar, con JSON indentado a dos espacios, antes de emitir', async () => {
+        const { handler, requestBuilder, synexusApiClient } = buildHandler(createV2Body());
 
-        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+        await expect(runV2(handler)).resolves.toBeUndefined();
 
         const builtBody = requestBuilder.buildRequestBody.mock.results[0].value;
         const traceCalls = consoleLogSpy.mock.calls
@@ -378,36 +416,39 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(traceCalls[0].call[0]).toContain('"transaction_type": "sales_estimate"');
         expect(traceCalls[0].call[0]).toContain('"request_id"');
 
-        // Después de construir el cuerpo (invocationCallOrder es global entre mocks)
+        // Después de construir el cuerpo y ANTES de emitirlo (invocationCallOrder es global entre mocks)
         const traceOrder = consoleLogSpy.mock.invocationCallOrder[traceCalls[0].index];
         expect(traceOrder).toBeGreaterThan(requestBuilder.buildRequestBody.mock.invocationCallOrder[0]);
+        expect(traceOrder).toBeLessThan(synexusApiClient.makeRequest.mock.invocationCallOrder[0]);
     });
 
     it('con un archivo que contradice la operación, aborta ANTES de llamar a buildRequestBody', async () => {
         const body = createV2Body();
         body.transaction_type = 'sales_invoice';
-        const { handler, spies, requestBuilder } = buildHandler(body);
+        const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(body);
 
         await expect(runV2(handler)).rejects.toThrow('sales_invoice');
 
         expect(requestBuilder.getIntentFor).toHaveBeenCalledTimes(1);
         expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
         expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(false);
     });
 
     it('con committed invertido en el archivo, aborta nombrando committed y sin construir el cuerpo (OPER-04 bajo v2)', async () => {
         const body = createV2Body();
         body.committed = true;
-        const { handler, requestBuilder } = buildHandler(body);
+        const { handler, requestBuilder, synexusApiClient } = buildHandler(body);
 
         await expect(runV2(handler)).rejects.toThrow('"committed"');
 
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
     it('con un archivo del contrato v1 bajo la rama v2, lanza el mensaje de la guardia y buildRequestBody no se llama', async () => {
-        const { handler, spies, requestBuilder } = buildHandler(createV1Body());
+        const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(createV1Body());
 
         await expect(runV2(handler)).rejects.toThrow(v1FileGuardMessage);
 
@@ -415,11 +456,12 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(spies.validateCommittedField).not.toHaveBeenCalled();
         expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
     it('con una operación sin mapeo, getIntentFor aborta antes de validar la intención y de construir nada', async () => {
         const noMappingMessage = 'La operación "post_tax" todavía no tiene mapeo de intención en el contrato v2';
-        const { handler, spies, requestBuilder } = buildHandler(createV2Body(), {
+        const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(createV2Body(), {
             getIntentFor: jest.fn(() => { throw new Error(noMappingMessage); })
         });
 
@@ -429,15 +471,17 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(spies.validate).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
     it('con readJsonFile devolviendo null, falla en validateRequestBody y no consulta la intención', async () => {
-        const { handler, requestBuilder } = buildHandler(null);
+        const { handler, requestBuilder, synexusApiClient } = buildHandler(null);
 
         await expect(runV2(handler)).rejects.toThrow('El cuerpo de la petición no es un objeto válido');
 
         expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
     describe('con el SynexusRequestBuilder real', () => {
@@ -450,22 +494,30 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
                 validateV2IntentFields: jest.spyOn(validator, 'validateV2IntentFields')
             };
             const requestBuilder = new SynexusRequestBuilder(logger);
+            const synexusApiClient = { makeRequest: jest.fn(async () => ({ id: 'txn_1', total_tax: '0.00' })) };
             const handler = new TaxCommandHandler(
                 fakes.createFakeConfig(),
                 logger,
-                { exists: () => true, readJsonFile: () => requestBody },
+                {
+                    exists: () => true,
+                    readJsonFile: () => requestBody,
+                    ensureDirectory: jest.fn(),
+                    getResponseFileName: jest.fn(() => '/tmp/nexgen-tests-output/RESPONSE_a.json'),
+                    writeJsonFile: jest.fn()
+                },
                 validator,
                 { makeRequest: jest.fn() },
                 { resolveEntityCode: jest.fn(() => 'USA'), printProfile: jest.fn() },
-                requestBuilder
+                requestBuilder,
+                synexusApiClient
             );
-            return { handler, spies };
+            return { handler, spies, synexusApiClient };
         };
 
-        it('get_tax con un archivo v2 llega a la guardia de cableado con el cuerpo tipado como sales_estimate y con request_id', async () => {
-            const { handler, spies } = buildRealHandler(createV2Body());
+        it('get_tax con un archivo v2 llega al cliente v2 con el cuerpo tipado como sales_estimate y con request_id', async () => {
+            const { handler, spies, synexusApiClient } = buildRealHandler(createV2Body());
 
-            await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+            await expect(runV2(handler)).resolves.toBeUndefined();
 
             const trace = consoleLogSpy.mock.calls.find(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix));
             expect(trace).toBeDefined();
@@ -477,10 +529,19 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             expect(printedBody.invoice_id).toBe('DEMO-001');
             expect(spies.validate).not.toHaveBeenCalled();
             expect(spies.validateCommittedField).not.toHaveBeenCalled();
+
+            // Lo que se emite es exactamente lo que se imprimió
+            expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+            const [operation, sentBody, entity] = synexusApiClient.makeRequest.mock.calls[0];
+            expect(operation).toBe('get_tax');
+            expect(entity).toBe('USA');
+            expect(sentBody).toEqual(printedBody);
+            expect(sentBody.transaction_type).toBe('sales_estimate');
+            expect(sentBody.committed).toBe(false);
         });
 
         it('post_tax bajo v2 aborta en el mapeo de intención, sin validar intención y sin llegar a la guardia', async () => {
-            const { handler, spies } = buildRealHandler(createV2Body());
+            const { handler, spies, synexusApiClient } = buildRealHandler(createV2Body());
 
             let caught = null;
             try {
@@ -493,6 +554,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             expect(caught.message).toContain('post_tax');
             expect(caught.message).not.toContain(wiringGuardMessage);
             expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+            expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
         });
     });
 });
