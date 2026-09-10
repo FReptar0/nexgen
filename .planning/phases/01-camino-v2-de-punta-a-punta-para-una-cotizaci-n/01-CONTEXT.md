@@ -45,7 +45,26 @@ escritura al archivo de salida (Fase 2), y toda verificación en vivo (Fase 3).
 
 ### Qué campos son de nexgen y cuáles del archivo de entrada
 
-- El JSON que deja el área de ERP es el cuerpo de la petición, igual que en v1.
+- El JSON que deja el área de ERP es el cuerpo de la petición, igual que en v1 —
+  **y ya viene en forma v2.** Es su lado del contrato: el área de ERP dijo textualmente
+  que genera desde Sage *"un archivo JSON con lo que tú vas a mandar de body"*, y el
+  cuerpo real que entregó como referencia ya usa `invoice_id`, `to_state`,
+  `cart[].item_id`. nexgen **no traduce esquemas**; nunca lo hizo.
+- **Consecuencia que el plan debe respetar: el archivo v2 NO trae `Committed` con
+  mayúscula.** Ese campo es del contrato v1. Por tanto `validateCommittedField` (que lee
+  `requestBody.Committed`) **no debe correr en la rama v2**: rechazaría todo archivo v2
+  real con "el valor Committed debe ser false". La rama v2 llama a los métodos del
+  validador por separado — `validateOperation`, `validateRequestBody`,
+  `sanitizeStringFields` y el nuevo `validateV2IntentFields` — y nunca al agregador
+  `validate()`, que queda intacto para v1.
+- **`OPER-04` bajo v2 se cumple con `validateV2IntentFields`**, no con el chequeo de v1.
+  La "validación estricta que impide invertir cotizar y confirmar" pasa a ser el chequeo
+  `===` de `committed` y `transaction_type` contra la operación invocada. Es el mismo
+  principio, sobre los campos del contrato que sí aplica.
+- Guardia barata contra el error humano más probable: si un archivo en la rama v2 trae
+  `Committed` con mayúscula, `validateV2IntentFields` aborta con un mensaje que diga que
+  el archivo parece de v1. Es exactamente lo que pasaría si alguien deja un archivo viejo
+  en la carpeta con el selector en v2.
 - **Pero nexgen es dueño de los campos de intención**, porque de ellos depende que una
   cotización no cree registros: `transaction_type`, `committed` y `request_id` los pone
   nexgen a partir de la operación invocada, no se heredan del archivo.

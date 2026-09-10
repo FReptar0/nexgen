@@ -57,20 +57,20 @@ Ninguno aún.
 
 ### Blockers/Concerns
 
-- 🔴 **BLOQUEANTE — La forma del JSON de entrada no coincide con lo que espera v2.** El
-  archivo que genera la extracción de Sage está en forma v1 (`Committed` con mayúscula,
-  `cartID`, `ToState`, `cart[].ItemID`); el contrato v2 espera `committed`, `invoice_id`,
-  `to_state`, `cart[].item_id`. Mandarlo tal cual produce un cuerpo con `Committed` y
-  `committed` a la vez y sin los campos obligatorios: el proveedor lo rechaza con `422`.
-  Detectado por el planner de Phase 1 el 2026-09-10, verificado contra
-  `src/validators/taxValidator.js:40`, `README.md:92` y el cuerpo v2 real del 9-sep.
-  **Origen:** `01-CONTEXT.md` fijó "el JSON del ERP es el cuerpo, igual que en v1"
-  interpretando de más una frase de la reunión que hablaba de la metodología de
-  intercambio, no de los nombres de campo.
-  **Decisión pendiente con el área de ERP:** o la extracción de Sage pasa a emitir la
-  forma v2 —lo probable, porque ya escribieron un cuerpo v2 a mano— o nexgen se hace
-  dueño de una tabla de traducción entre dos contratos de proveedor. Consultado el
-  2026-09-10; **los planes de Phase 1 quedan en pausa hasta la respuesta.**
+- ~~BLOQUEANTE — forma del JSON de entrada~~ **Rebajado el 2026-09-10 tras releer la
+  transcripción.** El área de ERP dijo textualmente que genera desde Sage *"un archivo
+  JSON con lo que tú vas a mandar de body"*, y el cuerpo real que entregó como referencia
+  ya está en forma v2. La forma del archivo es su lado del contrato y ya la produjo.
+  nexgen no traduce esquemas. Lo que el planner vio (`Committed`, `cartID`, `ToState`)
+  son los archivos de la era v1, no lo que se dejará para v2.
+  **Lo que sí era un defecto real, y quedó corregido en `01-CONTEXT.md`:** el plan 01-02
+  hacía correr `validate()` de v1 también en la rama v2, y ese agregador lee
+  `requestBody.Committed` con mayúscula — campo que el archivo v2 no trae. Habría
+  rechazado todo archivo real. La rama v2 debe llamar a los métodos del validador por
+  separado y cumplir `OPER-04` con `validateV2IntentFields`. Planes 01-02 y 01-03
+  requieren revisión puntual.
+  **Queda una confirmación de una línea con el área de ERP**, no una decisión: que la
+  extracción de Sage para v2 emite la misma forma que el cuerpo del 9-sep.
 - **El mecanismo del código de entidad quedó explícitamente sin definir** en la reunión del 9-sep. CFG-01 fija la precedencia (argumento > variable de entorno > campo del JSON), pero `Config` es hoy un singleton de proceso sin lugar para un valor por petición: su superficie pública probablemente cambie en Phase 1 y eso repercute en `TaxApiClient` y en el parseo de argumentos del CLI.
 - ~~Discrepancia en la ruta de cálculo v2~~ **Resuelto 2026-09-10:** no era discrepancia. La referencia de API (pág. 9) documenta `/api/v1/tax_calculations/calculate` como **alias oficial** de `/api/v1/tax_calculations`. Las dos rutas funcionan; la guía de migración simplemente usó el alias. nexgen usa la ruta canónica sin `/calculate`.
 - **Sin acceso a staging desde la máquina local.** Toda verificación en vivo depende del servidor de la empresa y del área de ERP. No hay forma de saltar esta frontera.
