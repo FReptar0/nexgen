@@ -31,7 +31,11 @@ const createFakeConfig = (overrides) => {
         getBaseUrl: jest.fn(() => 'https://ejemplo-v1.invalid/api/'),
         getApiCode: jest.fn(() => 'codigo-de-prueba-v1'),
         getOutputDir: jest.fn(() => '/tmp/nexgen-tests-output'),
-        isTestMode: jest.fn(() => false)
+        isTestMode: jest.fn(() => false),
+        // Mismo valor por omisión que el Config real con TAX_API_VERSION ausente
+        // (tests/setup.js la deja ausente): cualquier prueba que quiera v2 lo
+        // pide explícitamente por overrides o por el flag --api-version.
+        getApiVersion: jest.fn(() => 'v1')
     };
 
     return Object.assign(defaults, overrides || {});

@@ -26,6 +26,7 @@ const Logger = require('./src/infrastructure/logger');
 const FileManager = require('./src/storage/fileManager');
 const TaxValidator = require('./src/validators/taxValidator');
 const TaxApiClient = require('./src/api/taxApiClient');
+const SynexusConfig = require('./src/config/synexusConfig');
 const TaxCommandHandler = require('./src/cli/taxCommandHandler');
 
 /**
@@ -45,17 +46,27 @@ async function main() {
         // 4. Inicializar capa de API
         const apiClient = new TaxApiClient(config, logger);
 
-        // 5. Inicializar capa CLI (capa más alta)
+        // 5. Resolver el contrato y construir la configuración v2 sólo si se seleccionó v2.
+        //    Bajo v1 queda en null: un servidor sin variables de v2 nunca dispara sus frenos.
+        //    Requerir SynexusConfig arriba es seguro porque exporta la clase, no una instancia.
+        const args = process.argv.slice(2);
+        const apiVersion = TaxCommandHandler.resolveApiVersion(args, config, logger);
+        let synexusConfig = null;
+        if (apiVersion === 'v2') {
+            synexusConfig = new SynexusConfig();
+        }
+
+        // 6. Inicializar capa CLI (capa más alta)
         const commandHandler = new TaxCommandHandler(
             config,
             logger,
             fileManager,
             validator,
-            apiClient
+            apiClient,
+            synexusConfig
         );
 
-        // 6. Ejecutar el comando
-        const args = process.argv.slice(2);
+        // 7. Ejecutar el comando
         await commandHandler.execute(args);
 
     } catch (error) {

@@ -58,6 +58,16 @@ class Config {
     }
 
     /**
+     * Resuelve el contrato de API seleccionado en la configuración de entorno
+     * @returns {string} 'v2' si el selector lo pide explícitamente; 'v1' en cualquier otro caso
+     */
+    getApiVersion() {
+        // Afirma v2 con comparación estricta, con el mismo molde que isTestMode:
+        // TAX_API_VERSION ausente, vacía o mal escrita nunca activa v2 por accidente.
+        return process.env.TAX_API_VERSION === 'v2' ? 'v2' : 'v1';
+    }
+
+    /**
      * Obtiene el endpoint según la operación y el modo
      * @param {string} operation - Operación a realizar
      * @returns {string} URL completa del endpoint
