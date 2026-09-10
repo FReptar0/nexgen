@@ -10,6 +10,8 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+# Variante sin punto: apareció suelta y trae API_CODE (reunión 9-sep-2026)
+env
 
 # Logs
 logs/
