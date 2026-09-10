@@ -57,6 +57,20 @@ Ninguno aún.
 
 ### Blockers/Concerns
 
+- 🔴 **BLOQUEANTE — La forma del JSON de entrada no coincide con lo que espera v2.** El
+  archivo que genera la extracción de Sage está en forma v1 (`Committed` con mayúscula,
+  `cartID`, `ToState`, `cart[].ItemID`); el contrato v2 espera `committed`, `invoice_id`,
+  `to_state`, `cart[].item_id`. Mandarlo tal cual produce un cuerpo con `Committed` y
+  `committed` a la vez y sin los campos obligatorios: el proveedor lo rechaza con `422`.
+  Detectado por el planner de Phase 1 el 2026-09-10, verificado contra
+  `src/validators/taxValidator.js:40`, `README.md:92` y el cuerpo v2 real del 9-sep.
+  **Origen:** `01-CONTEXT.md` fijó "el JSON del ERP es el cuerpo, igual que en v1"
+  interpretando de más una frase de la reunión que hablaba de la metodología de
+  intercambio, no de los nombres de campo.
+  **Decisión pendiente con el área de ERP:** o la extracción de Sage pasa a emitir la
+  forma v2 —lo probable, porque ya escribieron un cuerpo v2 a mano— o nexgen se hace
+  dueño de una tabla de traducción entre dos contratos de proveedor. Consultado el
+  2026-09-10; **los planes de Phase 1 quedan en pausa hasta la respuesta.**
 - **El mecanismo del código de entidad quedó explícitamente sin definir** en la reunión del 9-sep. CFG-01 fija la precedencia (argumento > variable de entorno > campo del JSON), pero `Config` es hoy un singleton de proceso sin lugar para un valor por petición: su superficie pública probablemente cambie en Phase 1 y eso repercute en `TaxApiClient` y en el parseo de argumentos del CLI.
 - **Discrepancia en la ruta de cálculo v2** entre la guía de migración y la referencia de API (`/tax_calculations` con o sin `/calculate`). Gana la referencia de API porque coincide con la prueba real que respondió `200`. A confirmar en Phase 3.
 - **Sin acceso a staging desde la máquina local.** Toda verificación en vivo depende del servidor de la empresa y del área de ERP. No hay forma de saltar esta frontera.
