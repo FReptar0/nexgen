@@ -26,6 +26,7 @@ const Logger = require('./src/infrastructure/logger');
 const FileManager = require('./src/storage/fileManager');
 const TaxValidator = require('./src/validators/taxValidator');
 const TaxApiClient = require('./src/api/taxApiClient');
+const SynexusRequestBuilder = require('./src/api/synexusRequestBuilder');
 const SynexusConfig = require('./src/config/synexusConfig');
 const TaxCommandHandler = require('./src/cli/taxCommandHandler');
 
@@ -43,8 +44,10 @@ async function main() {
         // 3. Inicializar capa de validación
         const validator = new TaxValidator(logger);
 
-        // 4. Inicializar capa de API
+        // 4. Inicializar capa de API. El builder v2 se construye siempre: no valida
+        //    nada al construirse, así que es inocuo bajo v1
         const apiClient = new TaxApiClient(config, logger);
+        const requestBuilder = new SynexusRequestBuilder(logger);
 
         // 5. Resolver el contrato y construir la configuración v2 sólo si se seleccionó v2.
         //    Bajo v1 queda en null: un servidor sin variables de v2 nunca dispara sus frenos.
@@ -63,7 +66,8 @@ async function main() {
             fileManager,
             validator,
             apiClient,
-            synexusConfig
+            synexusConfig,
+            requestBuilder
         );
 
         // 7. Ejecutar el comando

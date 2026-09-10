@@ -17,14 +17,16 @@ class TaxCommandHandler {
      * @param {TaxValidator} validator - Validador
      * @param {TaxApiClient} apiClient - Cliente API (contrato v1)
      * @param {SynexusConfig|null} synexusConfig - Configuración del contrato v2; null cuando el contrato resuelto es v1
+     * @param {SynexusRequestBuilder} requestBuilder - Constructor del cuerpo v2 (intención + llave de idempotencia)
      */
-    constructor(config, logger, fileManager, validator, apiClient, synexusConfig) {
+    constructor(config, logger, fileManager, validator, apiClient, synexusConfig, requestBuilder) {
         this.config = config;
         this.logger = logger;
         this.fileManager = fileManager;
         this.validator = validator;
         this.apiClient = apiClient;
         this.synexusConfig = synexusConfig;
+        this.requestBuilder = requestBuilder;
         // Flags reconocidos por parseArguments. Cualquier otro argumento que
         // empiece con -- es error: un flag mal escrito que cayera en silencio en
         // v1 le haría creer al operador que probó v2.
@@ -164,19 +166,22 @@ class TaxCommandHandler {
 
     /**
      * Rama v2 de execute(): valida y sanea por separado, resuelve la entidad,
-     * anuncia el perfil efectivo y se detiene en la guardia de cableado.
+     * anuncia el perfil efectivo, valida la intención del archivo contra la de
+     * la operación, construye el cuerpo tipado, lo imprime y se detiene en la
+     * guardia de cableado.
      *
      * No usa el agregador del validador porque el archivo v2 no trae el campo
      * Committed —es del contrato v1— y la validación de ese campo rechazaría todo
      * archivo v2 real. validateOperation no se repite: ya corrió en el paso 2,
-     * común a los dos contratos. La validación de intención propia de v2 se
-     * agrega en el plan 01-03, entre el anuncio del perfil y la guardia.
+     * común a los dos contratos. La validación estricta de v2 es
+     * validateV2IntentFields, con la intención que devuelve el builder.
      * @private
      * @param {string} operation - Operación ya validada
      * @param {Object} requestBody - Cuerpo CRUDO, tal como salió de readJsonFile
      * @param {string|undefined} entityCode - Valor del flag --entity=, si se dio
      * @returns {Promise<Object>} Respuesta del cliente v2
-     * @throws {Error} Si el cuerpo no es un objeto, si la entidad no se resuelve, o si falta el cliente v2
+     * @throws {Error} Si el cuerpo no es un objeto, si la entidad no se resuelve, si la operación no tiene
+     *   mapeo de intención, si el archivo contradice la operación, o si falta el cliente v2
      */
     async _executeV2(operation, requestBody, entityCode) {
         // 1. Mismo freno que v1: un cuerpo nulo debe fallar en español, no con un TypeError
@@ -191,7 +196,21 @@ class TaxCommandHandler {
         // 4. Anunciar el perfil efectivo antes de cualquier salida a la red
         this.synexusConfig.printProfile(resolvedEntityCode);
 
-        // 5. Guardia de cableado. No es un andamio: cuando el cliente v2 se inyecte
+        // 5. La intención primero: una operación sin mapeo en el contrato v2 aborta
+        //    aquí, antes de que se valide o se construya nada
+        const intent = this.requestBuilder.getIntentFor(operation);
+
+        // 6. Validar antes de construir: un archivo que contradice la operación (o
+        //    que parece de v1) aborta antes de que exista un cuerpo. La intención
+        //    que se compara es la MISMA que devolvió el builder: una sola fuente
+        this.validator.validateV2IntentFields(operation, sanitizedRequestBody, intent);
+
+        // 7. Construir el cuerpo tipado y mostrarlo: es lo que permite al operador
+        //    verificar el tipado antes de que salga. No lleva credencial alguna
+        const v2RequestBody = this.requestBuilder.buildRequestBody(operation, sanitizedRequestBody);
+        console.log(`Cuerpo v2 a enviar: ${JSON.stringify(v2RequestBody, null, 2)}`);
+
+        // 8. Guardia de cableado. No es un andamio: cuando el cliente v2 se inyecte
         //    (plan 01-04) queda como defensa permanente contra un cableado
         //    incompleto en index.js
         if (!this.synexusApiClient) {

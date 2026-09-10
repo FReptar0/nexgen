@@ -201,6 +201,17 @@ describe('Ramificación de execute() por contrato — antes de la validación de
             resolveEntityCode: jest.fn(() => 'USA'),
             printProfile: jest.fn()
         };
+        // Doble del builder v2 (séptimo colaborador desde el plan 01-03). Aquí sólo
+        // deja pasar la rama; lo que hace de verdad se prueba en
+        // tests/synexusRequestBuilder.test.js y tests/v2IntentValidation.test.js.
+        const requestBuilder = {
+            getIntentFor: jest.fn(() => ({ transaction_type: 'sales_estimate', committed: false })),
+            buildRequestBody: jest.fn((operation, body) => Object.assign({}, body, {
+                transaction_type: 'sales_estimate',
+                committed: false,
+                request_id: '33333333-3333-4333-8333-333333333333'
+            }))
+        };
         const fakeConfig = fakes.createFakeConfig({ getApiVersion: jest.fn(() => 'v1') });
         const handler = new TaxCommandHandler(
             fakeConfig,
@@ -208,10 +219,11 @@ describe('Ramificación de execute() por contrato — antes de la validación de
             fileManager,
             validator,
             apiClient,
-            synexusConfig
+            synexusConfig,
+            requestBuilder
         );
 
-        return { handler, spies, apiClient, synexusConfig, fileManager };
+        return { handler, spies, apiClient, synexusConfig, fileManager, requestBuilder };
     };
 
     it('bajo v1 con cuerpo v1 conserva la secuencia de siempre: validate una vez y makeRequest con lo que validate devolvió', async () => {
