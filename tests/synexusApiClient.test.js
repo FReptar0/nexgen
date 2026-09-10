@@ -268,9 +268,13 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
         expect(caught).not.toBeNull();
         expect(caught.message.startsWith('Error HTTP 400: ')).toBe(true);
         expect(caught.message).toBe('Error HTTP 400: {"error":"tax_code_missing"}');
-        expect(logger.error).toHaveBeenCalledTimes(1);
+        // Misma estructura que el molde de v1: el throw de _handleResponse cae en
+        // el catch de makeRequest, que además pasa por _handleError. Por eso el
+        // logger recibe dos entradas; la primera es la de _handleResponse.
+        expect(logger.error).toHaveBeenCalled();
         expect(logger.error.mock.calls[0][0]).toContain('Error HTTP 400');
         expect(logger.error.mock.calls[0][0]).toContain('Operation: get_tax');
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Error HTTP 400: {"error":"tax_code_missing"}');
     });
 
     it('con 422 (dentro del corte de validateStatus) también lanza con el prefijo Error HTTP', async () => {
