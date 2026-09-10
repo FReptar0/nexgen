@@ -9,9 +9,9 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 ### Conexión y contrato (CONN)
 
-- [ ] **CONN-01**: El cliente HTTP emite `POST` con cuerpo JSON contra el contrato v2, sin alterar el `GET`-con-cuerpo que usa el camino v1
-- [ ] **CONN-02**: La autenticación v2 viaja como header `Authorization: Bearer <llave>`, nunca como parámetro en la URL
-- [ ] **CONN-03**: El código de entidad viaja en su header dedicado en toda petición v2 que lo requiera
+- [x] **CONN-01**: El cliente HTTP emite `POST` con cuerpo JSON contra el contrato v2, sin alterar el `GET`-con-cuerpo que usa el camino v1
+- [x] **CONN-02**: La autenticación v2 viaja como header `Authorization: Bearer <llave>`, nunca como parámetro en la URL
+- [x] **CONN-03**: El código de entidad viaja en su header dedicado en toda petición v2 que lo requiera
 - [x] **CONN-04**: La URL base de v2 se resuelve desde configuración, no está escrita en el código
 - [x] **CONN-05**: El operador puede leer en la salida estándar, al inicio de cada corrida, qué contrato y qué host se van a usar antes de que salga la petición
 
@@ -106,9 +106,9 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONN-01 | Phase 1 | Pending |
-| CONN-02 | Phase 1 | Pending |
-| CONN-03 | Phase 1 | Pending |
+| CONN-01 | Phase 1 | Complete |
+| CONN-02 | Phase 1 | Complete |
+| CONN-03 | Phase 1 | Complete |
 | CONN-04 | Phase 1 | Complete |
 | CONN-05 | Phase 1 | Complete |
 | OPER-01 | Phase 1 | Complete |
