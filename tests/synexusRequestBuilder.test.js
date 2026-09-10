@@ -158,10 +158,10 @@ describe('Llave de idempotencia (SAFE-01) — request_id generado por nexgen', (
         expect(first.request_id).not.toBe(second.request_id);
     });
 
-    it('_generateIdempotencyKey produce llaves con el formato y sin repetirse en una tanda', () => {
+    it('_generateRequestId produce llaves con el formato y sin repetirse en una tanda', () => {
         const keys = new Set();
         for (let i = 0; i < 50; i++) {
-            const key = builder._generateIdempotencyKey();
+            const key = builder._generateRequestId();
             expect(key).toMatch(uuidV4Pattern);
             keys.add(key);
         }
@@ -233,7 +233,7 @@ describe('_assertIntentFieldsPresent — un campo de intención ausente aborta a
     });
 
     it('si la llave de idempotencia faltara, lanza nombrando request_id', () => {
-        jest.spyOn(builder, '_generateIdempotencyKey').mockReturnValue('');
+        jest.spyOn(builder, '_generateRequestId').mockReturnValue('');
 
         expect(() => builder.buildRequestBody('get_tax', createV2Body())).toThrow('request_id');
     });
