@@ -57,7 +57,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   6. `get_tax` produce un `POST` con cuerpo JSON contra la ruta de cálculo v2, con la llave en el header `Authorization: Bearer`, el código de entidad en su header dedicado, ninguna credencial en la URL, una llave de idempotencia única generada por nexgen, y un cuerpo tipado de forma que el proveedor no persiste registro alguno —con prueba que falla si ese cuerpo pudiera persistir factura—; el cableado nuevo se arma sólo en `index.js`, sin que ninguna capa introducida requiera a otra por fuera de su constructor
 **Plans**: 4 plans
 Plans:
-- [ ] 01-01-PLAN.md — Runner de pruebas y congelamiento del camino v1
+- [x] 01-01-PLAN.md — Runner de pruebas y congelamiento del camino v1
 - [ ] 01-02-PLAN.md — Selector de contrato y configuración v2 con frenos antes de la red
 - [ ] 01-03-PLAN.md — Cuerpo de la cotización tipado como estimación, con su guardia de regresión
 - [ ] 01-04-PLAN.md — La petición v2 sale: POST, header portador y cierre del cableado

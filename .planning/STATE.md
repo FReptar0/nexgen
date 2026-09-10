@@ -1,3 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: executing
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-10T20:35:35.358Z"
+last_activity: 2026-09-10
+progress:
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 1
+  percent: 25
+---
+
 # Project State
 
 ## Project Reference
@@ -5,20 +21,21 @@
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** El monto de impuesto que nexgen escribe en el archivo de respuesta tiene que ser el correcto, y no debe alterar estado en la API del proveedor sin que se haya pedido explícitamente.
-**Current focus:** Phase 1 — Camino v2 de punta a punta para una cotización
+**Current focus:** Phase 01 — camino-v2-de-punta-a-punta-para-una-cotizaci-n
 
 ## Current Position
 
-Phase: 1 of 3 (Camino v2 de punta a punta para una cotización)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-09-10 — Roadmap consolidado a 3 fases (granularidad `coarse`); los 35 requisitos v1 siguen mapeados, ninguno diferido
+Phase: 01 (camino-v2-de-punta-a-punta-para-una-cotizaci-n) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-09-10
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 0
 - Average duration: —
 - Total execution time: —
@@ -30,10 +47,12 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 **Recent Trend:**
+
 - Last 5 plans: —
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01 P01 | 6min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -48,6 +67,10 @@ Decisiones que afectan el trabajo actual:
 - [Roadmap]: OPER-01 y su guardia de regresión TEST-03 viven en la misma fase (Phase 1), porque la prueba es lo único que impide que un refactor reintroduzca la persistencia fantasma de la cotización
 - [Roadmap]: La verificación contra staging es una fase final aparte (Phase 3) que ejecuta el área de ERP, no quien implementa — el proveedor restringe el acceso a EE.UU./Canadá y las credenciales viven con ese equipo
 - [Roadmap]: Las fases 1 y 2 se escriben para ser comprobables sin red; el único criterio de todo el roadmap que exige una llamada en vivo es el criterio 2 de la Phase 3
+- [Phase 01]: Mensajes de v1 congelados con toThrow(new Error(msg)) — Jest exige igualdad exacta del mensaje con una instancia de Error; toThrow('msg') sólo verifica contención y dejaría pasar cambios sutiles
+- [Phase 01]: parseArguments se congela por propiedad (operation, filePath), no con toEqual del objeto completo — El plan 02 agrega el selector de contrato al objeto de retorno; un toEqual estricto convertiría ese cambio legítimo en un falso positivo
+- [Phase 01]: Las URLs de v1 se congelan con toBe sobre la cadena completa — Es más fuerte que endsWith y fija también la concatenación sin separador de baseUrl, que es parte de la URL resuelta
+- [Phase 01]: Cada prueba de congelamiento se validó por mutación antes de commitear — Alterar v1, ver fallar la suite y restaurar es lo que convierte 'la suite protege a v1' de una afirmación en un hecho
 
 ### Pending Todos
 
@@ -71,6 +94,7 @@ Ninguno aún.
   requieren revisión puntual.
   **Queda una confirmación de una línea con el área de ERP**, no una decisión: que la
   extracción de Sage para v2 emite la misma forma que el cuerpo del 9-sep.
+
 - **El mecanismo del código de entidad quedó explícitamente sin definir** en la reunión del 9-sep. CFG-01 fija la precedencia (argumento > variable de entorno > campo del JSON), pero `Config` es hoy un singleton de proceso sin lugar para un valor por petición: su superficie pública probablemente cambie en Phase 1 y eso repercute en `TaxApiClient` y en el parseo de argumentos del CLI.
 - ~~Discrepancia en la ruta de cálculo v2~~ **Resuelto 2026-09-10:** no era discrepancia. La referencia de API (pág. 9) documenta `/api/v1/tax_calculations/calculate` como **alias oficial** de `/api/v1/tax_calculations`. Las dos rutas funcionan; la guía de migración simplemente usó el alias. nexgen usa la ruta canónica sin `/calculate`.
 - **Sin acceso a staging desde la máquina local.** Toda verificación en vivo depende del servidor de la empresa y del área de ERP. No hay forma de saltar esta frontera.
@@ -93,6 +117,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-10
-Stopped at: Roadmap consolidado a 3 fases; trazabilidad de REQUIREMENTS.md remapeada, CFG-03 reescrito y su resolución registrada en Key Decisions de PROJECT.md
+Last session: 2026-09-10T20:35:35.355Z
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None

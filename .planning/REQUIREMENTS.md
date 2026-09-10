@@ -42,19 +42,19 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 ### Compatibilidad (COMP)
 
-- [ ] **COMP-01**: El camino v1 conserva exactamente su comportamiento actual — mismo método, misma URL, misma autenticación, mismos mensajes
+- [x] **COMP-01**: El camino v1 conserva exactamente su comportamiento actual — mismo método, misma URL, misma autenticación, mismos mensajes
 - [ ] **COMP-02**: El contrato de archivos se conserva sin cambios: mismo nombre de entrada, prefijo `RESPONSE_`, numeración original, mismo directorio de salida
 - [ ] **COMP-03**: La respuesta v2 se escribe completa y sin transformar, tal como la devuelve el proveedor
 - [ ] **COMP-04**: La arquitectura en cinco capas se respeta — ninguna capa nueva alcanza a otra por fuera de la inyección de dependencias en el punto de entrada
 
 ### Pruebas (TEST)
 
-- [ ] **TEST-01**: Existe un runner de pruebas ejecutable con un solo comando
+- [x] **TEST-01**: Existe un runner de pruebas ejecutable con un solo comando
 - [ ] **TEST-02**: Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que se construye, sin salir a la red
 - [ ] **TEST-03**: Hay prueba que falla si `get_tax` llegara a construir una petición que persista factura
 - [ ] **TEST-04**: Hay prueba que falla si un monto de la respuesta pasa por conversión a punto flotante
 - [ ] **TEST-05**: Hay prueba que verifica el rechazo por descuadre entre prefijo de llave y host
-- [ ] **TEST-06**: La suite corre sin credenciales y sin acceso a la red
+- [x] **TEST-06**: La suite corre sin credenciales y sin acceso a la red
 
 ### Verificación (VERIF)
 
@@ -127,16 +127,16 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CFG-03 | Phase 1 | Pending |
 | CFG-04 | Phase 1 | Pending |
 | CFG-05 | Phase 1 | Pending |
-| COMP-01 | Phase 1 | Pending |
+| COMP-01 | Phase 1 | Complete |
 | COMP-02 | Phase 2 | Pending |
 | COMP-03 | Phase 2 | Pending |
 | COMP-04 | Phase 1 | Pending |
-| TEST-01 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 1 | Pending |
 | TEST-04 | Phase 2 | Pending |
 | TEST-05 | Phase 1 | Pending |
-| TEST-06 | Phase 1 | Pending |
+| TEST-06 | Phase 1 | Complete |
 | VERIF-01 | Phase 2 | Pending |
 | VERIF-02 | Phase 3 | Pending |
 | VERIF-03 | Phase 3 | Pending |
