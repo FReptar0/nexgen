@@ -9,6 +9,13 @@ allowed-tools: Read, Bash(node:*), Bash(ls:*), Bash(cat:*)
 Revert a previously committed tax transaction by hitting the
 `CancelTransaction` endpoint with the fixture `$ARGUMENTS`.
 
+> **Contract note.** This command runs the **v1** path by default. The
+> `--api-version=v2` flag (or `TAX_API_VERSION=v2`) selects the Synexus
+> Compute contract, but `cancel_tax` is **not mapped under v2 yet** (phase
+> 2 of the migration): with the flag, the run aborts before any request
+> with `todavía no tiene mapeo de intención en el contrato v2`. Do not add
+> the flag here; everything below describes v1.
+
 > **Note on TEST_MODE**: `cancel_tax` **does not respect `TEST_MODE`**.
 > The URL is always `<BASE_URL>CancelTransaction` regardless. If you
 > need to cancel a sandbox transaction, the same endpoint is used —

@@ -26,7 +26,15 @@ The class `TaxValidator` exposes:
 - `validate(operation, requestBody)` — aggregator: calls
   `validateOperation`, `validateRequestBody`,
   `validateCommittedField`, then returns the result of
-  `sanitizeStringFields`.
+  `sanitizeStringFields`. **This is the v1 path.**
+- `validateV2IntentFields(operation, requestBody, expectedIntent)` —
+  sibling of `validateCommittedField` for the **v2** contract: aborts if
+  the file carries `Committed` (looks like a v1 file), if
+  `transaction_type` / `committed` contradict the intent returned by
+  `SynexusRequestBuilder.getIntentFor`, or if the file brings its own
+  `request_id`. It is called **only** by `_executeV2` in the CLI layer
+  and is **deliberately not part of `validate()`** — the v2 file has no
+  `Committed`, so the v1 aggregator would reject every real v2 file.
 
 Every error path follows this template:
 
@@ -55,8 +63,11 @@ throw new Error(errorMsg);
    (Spanish, `@param`, `@throws`, `@returns`).
 4. **Preserve invariants**:
    - `validate()` must keep returning a sanitized body.
-   - New checks should be reachable from `validate()` so callers (CLI
-     layer) don't need changes.
+   - New **v1** checks should be reachable from `validate()` so callers
+     (CLI layer) don't need changes. New **v2** checks go in (or next to)
+     `validateV2IntentFields`, never in `validate()`: the two branches are
+     kept apart on purpose, and `validateCommittedField` is frozen by the
+     test suite (`tests/v1Freeze.messages.test.js`).
    - Error path uses the `console.error` + `logger.error` + `throw`
      trio.
    - Error messages in Spanish, addressed to the operator.
@@ -81,9 +92,11 @@ throw new Error(errorMsg);
   D3).
 - **Do not switch error messages to English.** The CLI surface is
   Spanish.
-- **No tests today**: if the project adds Jest later, write a
-  companion test file in `src/validators/__tests__/` or
-  `__tests__/validators/`. Don't invent a runner that isn't there.
+- **Tests exist**: `npm test` runs Jest (`tests/*.test.js`, no `.env`,
+  no network). `tests/v1Freeze.messages.test.js` freezes the v1 messages
+  and `tests/v2IntentValidation.test.js` covers `validateV2IntentFields`.
+  Any change to this file must keep the suite green; add cases in
+  `tests/` rather than inventing another location.
 
 ## Output format
 

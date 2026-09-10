@@ -14,6 +14,13 @@ allowed-tools: Read, Bash(node:*), Bash(ls:*), Bash(cat:*)
 Run `post_tax` against the fixture `$ARGUMENTS` and explain the
 outcome.
 
+> **Contract note.** This command runs the **v1** path by default. The
+> `--api-version=v2` flag (or `TAX_API_VERSION=v2`) selects the Synexus
+> Compute contract, but `post_tax` is **not mapped under v2 yet** (phase 2
+> of the migration): with the flag, the run aborts before any request with
+> `todavía no tiene mapeo de intención en el contrato v2`. Do not add the
+> flag here; everything below describes v1.
+
 ## Pre-flight (mandatory)
 
 Before invoking `node`, confirm these out loud to the user:

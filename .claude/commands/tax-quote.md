@@ -10,6 +10,14 @@ Run `get_tax` against the fixture `$ARGUMENTS` (or pick the most
 recent one in `test-files/` if no argument given), then explain what
 came back.
 
+> **Contract note.** This command runs the **v1** path by default
+> (`STCCalcV3` on Azure). The new Synexus Compute contract exists behind
+> `--api-version=v2` (or `TAX_API_VERSION=v2` in `.env`), with an
+> optional `--entity=<code>`. Under v2 the fixture must be in v2 shape
+> (no `Committed` field; nexgen adds `transaction_type: "sales_estimate"`,
+> `committed: false` and `request_id` itself) and the `SYNEXUS_*`
+> variables must be set. Do not add the flag unless the user asks for v2.
+
 ## Pre-flight checks
 
 - Confirm `.env` exists at the repo root (do **not** read its
@@ -25,13 +33,27 @@ came back.
    `Committed` field **must be `false`** for `get_tax` — if it's
    `true`, stop and tell the user to flip it, or copy the fixture
    under a new name and edit. Don't silently mutate the file.
+   (Under `--api-version=v2` the rule inverts: the file must **not**
+   have `Committed` at all, or the run aborts with
+   `parece del contrato v1`.)
 2. **Run the command** exactly:
    ```bash
    node index.js get_tax test-files/$ARGUMENTS
    ```
+   For the v2 contract, only when the user asked for it:
+   ```bash
+   node index.js get_tax test-files/$ARGUMENTS --api-version=v2 --entity=<code>
+   ```
 3. **Capture and explain**:
    - The URL printed to stdout (verify `STCCalcV3` vs `STCCalcV3_TEST`
      against `TEST_MODE`).
+   - **Under v2**, the first thing printed is the profile line:
+     `Perfil efectivo -> contrato: v2 | host: ... | entidad: ... | llave: synexus_test_...abcd`.
+     Verify contract, host and entity there, and the URL printed later
+     ends in `/api/v1/tax_calculations` with no `?code=`. **The masked
+     key (`prefix...last4`) is correct and intentional** — it is not a
+     truncated or broken value; do not report it as a defect and do not
+     try to print the full key.
    - The status code returned by the server.
    - The `RESPONSE_$ARGUMENTS` file in `OUTPUT_DIR` (if produced).
 4. **Summarize** for the operator:
