@@ -12,8 +12,8 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 - [ ] **CONN-01**: El cliente HTTP emite `POST` con cuerpo JSON contra el contrato v2, sin alterar el `GET`-con-cuerpo que usa el camino v1
 - [ ] **CONN-02**: La autenticación v2 viaja como header `Authorization: Bearer <llave>`, nunca como parámetro en la URL
 - [ ] **CONN-03**: El código de entidad viaja en su header dedicado en toda petición v2 que lo requiera
-- [ ] **CONN-04**: La URL base de v2 se resuelve desde configuración, no está escrita en el código
-- [ ] **CONN-05**: El operador puede leer en la salida estándar, al inicio de cada corrida, qué contrato y qué host se van a usar antes de que salga la petición
+- [x] **CONN-04**: La URL base de v2 se resuelve desde configuración, no está escrita en el código
+- [x] **CONN-05**: El operador puede leer en la salida estándar, al inicio de cada corrida, qué contrato y qué host se van a usar antes de que salga la petición
 
 ### Semántica de operaciones (OPER)
 
@@ -27,25 +27,25 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 - [ ] **SAFE-01**: Toda petición v2 lleva una llave de idempotencia única generada por nexgen
 - [ ] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
-- [ ] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
+- [x] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
 - [ ] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
 - [ ] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
 - [ ] **SAFE-06**: El identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida, para poder levantar soporte
 
 ### Configuración (CFG)
 
-- [ ] **CFG-01**: El código de entidad se resuelve por precedencia — argumento de línea de comandos, luego variable de entorno, luego campo del JSON de entrada — y nunca está escrito en el código
-- [ ] **CFG-02**: Si el código de entidad no se resuelve por ninguna vía, la corrida aborta con un mensaje en español que dice cómo proporcionarlo
-- [ ] **CFG-03**: v2 nunca se activa por omisión — v1 es el comportamiento por defecto cuando no se indica contrato, y v2 requiere activación explícita. El interruptor de despliegue vive en la configuración de entorno; un argumento de línea de comandos lo sobreescribe para pruebas puntuales.
-- [ ] **CFG-04**: Si falta cualquier variable requerida por el camino v2, la corrida aborta al arrancar, nombrando cuáles faltan
-- [ ] **CFG-05**: Ninguna credencial aparece en la salida estándar ni en los archivos de log
+- [x] **CFG-01**: El código de entidad se resuelve por precedencia — argumento de línea de comandos, luego variable de entorno, luego campo del JSON de entrada — y nunca está escrito en el código
+- [x] **CFG-02**: Si el código de entidad no se resuelve por ninguna vía, la corrida aborta con un mensaje en español que dice cómo proporcionarlo
+- [x] **CFG-03**: v2 nunca se activa por omisión — v1 es el comportamiento por defecto cuando no se indica contrato, y v2 requiere activación explícita. El interruptor de despliegue vive en la configuración de entorno; un argumento de línea de comandos lo sobreescribe para pruebas puntuales.
+- [x] **CFG-04**: Si falta cualquier variable requerida por el camino v2, la corrida aborta al arrancar, nombrando cuáles faltan
+- [x] **CFG-05**: Ninguna credencial aparece en la salida estándar ni en los archivos de log
 
 ### Compatibilidad (COMP)
 
 - [x] **COMP-01**: El camino v1 conserva exactamente su comportamiento actual — mismo método, misma URL, misma autenticación, mismos mensajes
 - [ ] **COMP-02**: El contrato de archivos se conserva sin cambios: mismo nombre de entrada, prefijo `RESPONSE_`, numeración original, mismo directorio de salida
 - [ ] **COMP-03**: La respuesta v2 se escribe completa y sin transformar, tal como la devuelve el proveedor
-- [ ] **COMP-04**: La arquitectura en cinco capas se respeta — ninguna capa nueva alcanza a otra por fuera de la inyección de dependencias en el punto de entrada
+- [x] **COMP-04**: La arquitectura en cinco capas se respeta — ninguna capa nueva alcanza a otra por fuera de la inyección de dependencias en el punto de entrada
 
 ### Pruebas (TEST)
 
@@ -53,7 +53,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 - [ ] **TEST-02**: Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que se construye, sin salir a la red
 - [ ] **TEST-03**: Hay prueba que falla si `get_tax` llegara a construir una petición que persista factura
 - [ ] **TEST-04**: Hay prueba que falla si un monto de la respuesta pasa por conversión a punto flotante
-- [ ] **TEST-05**: Hay prueba que verifica el rechazo por descuadre entre prefijo de llave y host
+- [x] **TEST-05**: Hay prueba que verifica el rechazo por descuadre entre prefijo de llave y host
 - [x] **TEST-06**: La suite corre sin credenciales y sin acceso a la red
 
 ### Verificación (VERIF)
@@ -109,8 +109,8 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CONN-01 | Phase 1 | Pending |
 | CONN-02 | Phase 1 | Pending |
 | CONN-03 | Phase 1 | Pending |
-| CONN-04 | Phase 1 | Pending |
-| CONN-05 | Phase 1 | Pending |
+| CONN-04 | Phase 1 | Complete |
+| CONN-05 | Phase 1 | Complete |
 | OPER-01 | Phase 1 | Pending |
 | OPER-02 | Phase 2 | Pending |
 | OPER-03 | Phase 2 | Pending |
@@ -118,24 +118,24 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | OPER-05 | Phase 1 | Pending |
 | SAFE-01 | Phase 1 | Pending |
 | SAFE-02 | Phase 2 | Pending |
-| SAFE-03 | Phase 1 | Pending |
+| SAFE-03 | Phase 1 | Complete |
 | SAFE-04 | Phase 2 | Pending |
 | SAFE-05 | Phase 2 | Pending |
 | SAFE-06 | Phase 2 | Pending |
-| CFG-01 | Phase 1 | Pending |
-| CFG-02 | Phase 1 | Pending |
-| CFG-03 | Phase 1 | Pending |
-| CFG-04 | Phase 1 | Pending |
-| CFG-05 | Phase 1 | Pending |
+| CFG-01 | Phase 1 | Complete |
+| CFG-02 | Phase 1 | Complete |
+| CFG-03 | Phase 1 | Complete |
+| CFG-04 | Phase 1 | Complete |
+| CFG-05 | Phase 1 | Complete |
 | COMP-01 | Phase 1 | Complete |
 | COMP-02 | Phase 2 | Pending |
 | COMP-03 | Phase 2 | Pending |
-| COMP-04 | Phase 1 | Pending |
+| COMP-04 | Phase 1 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
 | TEST-03 | Phase 1 | Pending |
 | TEST-04 | Phase 2 | Pending |
-| TEST-05 | Phase 1 | Pending |
+| TEST-05 | Phase 1 | Complete |
 | TEST-06 | Phase 1 | Complete |
 | VERIF-01 | Phase 2 | Pending |
 | VERIF-02 | Phase 3 | Pending |

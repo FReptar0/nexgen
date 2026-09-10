@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-10T20:35:35.358Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-10T20:55:49.407Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 2
+  percent: 50
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 01 (camino-v2-de-punta-a-punta-para-una-cotizaci-n) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [███░░░░░░░] 25%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 6min | 3 tasks | 8 files |
+| Phase 01 P02 | 16min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -71,6 +72,11 @@ Decisiones que afectan el trabajo actual:
 - [Phase 01]: parseArguments se congela por propiedad (operation, filePath), no con toEqual del objeto completo — El plan 02 agrega el selector de contrato al objeto de retorno; un toEqual estricto convertiría ese cambio legítimo en un falso positivo
 - [Phase 01]: Las URLs de v1 se congelan con toBe sobre la cadena completa — Es más fuerte que endsWith y fija también la concatenación sin separador de baseUrl, que es parte de la URL resuelta
 - [Phase 01]: Cada prueba de congelamiento se validó por mutación antes de commitear — Alterar v1, ver fallar la suite y restaurar es lo que convierte 'la suite protege a v1' de una afirmación en un hecho
+- [Phase 01]: SynexusConfig exporta la clase y se construye sólo cuando el selector resolvió v2 — El require es inocuo para v1 y sus frenos (variables requeridas, llave↔host) nunca corren en un servidor sin variables de v2
+- [Phase 01]: execute() ramifica por contrato ANTES del paso 5 de v1; _executeV2 llama validateRequestBody y sanitizeStringFields por separado y nunca validate() ni validateCommittedField — El archivo v2 no trae Committed y el agregador de v1 lo rechazaría antes de llegar a rama alguna
+- [Phase 01]: _maskApiKey devuelve *** también con una llave de longitud exacta prefijo+4 — Con esa longitud la máscara revelaría la llave entera, que es lo que CFG-05 prohíbe
+- [Phase 01]: El doble de Config gana getApiVersion => 'v1' por omisión — El doble refleja la superficie pública real de Config y las pruebas de congelamiento de v1 siguen verdes sin tocarlas
+- [Phase 01]: .env.example no se creó: los permisos del proyecto niegan escribir ./.env.* y no se rodeó — Es una decisión del dueño del repo sobre esa familia de archivos; el contenido propuesto va en 01-02-SUMMARY.md como acción del usuario
 
 ### Pending Todos
 
@@ -117,6 +123,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-10T20:35:35.355Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-10T20:55:37.074Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
