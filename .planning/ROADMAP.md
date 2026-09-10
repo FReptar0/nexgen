@@ -55,7 +55,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. El código de entidad se resuelve por precedencia —argumento de línea de comandos, luego variable de entorno, luego campo del JSON—; si ninguna vía lo provee, o si falta cualquier otra variable requerida por el camino v2, la corrida aborta al arrancar con un mensaje en español que nombra qué falta y cómo proporcionarlo
   5. Abortan antes de emitir cualquier petición de red: una corrida cuyo prefijo de llave no corresponde al host configurado —con prueba que verifica ese rechazo—, un `Committed` invertido, una operación fuera de la lista y un campo de intención ausente
   6. `get_tax` produce un `POST` con cuerpo JSON contra la ruta de cálculo v2, con la llave en el header `Authorization: Bearer`, el código de entidad en su header dedicado, ninguna credencial en la URL, una llave de idempotencia única generada por nexgen, y un cuerpo tipado de forma que el proveedor no persiste registro alguno —con prueba que falla si ese cuerpo pudiera persistir factura—; el cableado nuevo se arma sólo en `index.js`, sin que ninguna capa introducida requiera a otra por fuera de su constructor
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 01-01-PLAN.md — Runner de pruebas y congelamiento del camino v1
+- [ ] 01-02-PLAN.md — Selector de contrato y configuración v2 con frenos antes de la red
+- [ ] 01-03-PLAN.md — Cuerpo de la cotización tipado como estimación, con su guardia de regresión
+- [ ] 01-04-PLAN.md — La petición v2 sale: POST, header portador y cierre del cableado
 **Nota**: Aquí vive el riesgo más caro del milestone. El mapeo obvio del contrato v2 —marcar la cotización como no confirmada— igual persiste un snapshot de factura del lado del proveedor; suprimir la persistencia exige tipar la transacción explícitamente. Por eso OPER-01 y su guardia de regresión TEST-03 se quedan juntos en esta fase: la prueba es lo único que impide que un refactor futuro reintroduzca el registro fantasma.
 **Nota**: La tensión CFG-03 ↔ COMP-01 ya está resuelta y esta fase la implementa, no la decide. v1 es el comportamiento por defecto cuando no se indica contrato, porque el envoltorio del ERP invoca `node index.js get_tax <archivo>` sin selector y no puede cambiarse; v2 requiere activación explícita mediante el interruptor de despliegue en la configuración de entorno, que un argumento de línea de comandos sobreescribe para pruebas puntuales.
 
@@ -92,7 +97,7 @@ Las fases se ejecutan en orden numérico: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Camino v2 de punta a punta para una cotización | 0/TBD | Not started | - |
+| 1. Camino v2 de punta a punta para una cotización | 0/4 | Not started | - |
 | 2. Confirmar, cancelar y devolver la respuesta íntegra | 0/TBD | Not started | - |
 | 3. Verificación contra staging y corte documentado | 0/TBD | Not started | - |
 
