@@ -59,7 +59,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — Runner de pruebas y congelamiento del camino v1
 - [x] 01-02-PLAN.md — Selector de contrato y configuración v2 con frenos antes de la red
-- [ ] 01-03-PLAN.md — Cuerpo de la cotización tipado como estimación, con su guardia de regresión
+- [x] 01-03-PLAN.md — Cuerpo de la cotización tipado como estimación, con su guardia de regresión
 - [ ] 01-04-PLAN.md — La petición v2 sale: POST, header portador y cierre del cableado
 **Nota**: Aquí vive el riesgo más caro del milestone. El mapeo obvio del contrato v2 —marcar la cotización como no confirmada— igual persiste un snapshot de factura del lado del proveedor; suprimir la persistencia exige tipar la transacción explícitamente. Por eso OPER-01 y su guardia de regresión TEST-03 se quedan juntos en esta fase: la prueba es lo único que impide que un refactor futuro reintroduzca el registro fantasma.
 **Nota**: La tensión CFG-03 ↔ COMP-01 ya está resuelta y esta fase la implementa, no la decide. v1 es el comportamiento por defecto cuando no se indica contrato, porque el envoltorio del ERP invoca `node index.js get_tax <archivo>` sin selector y no puede cambiarse; v2 requiere activación explícita mediante el interruptor de despliegue en la configuración de entorno, que un argumento de línea de comandos sobreescribe para pruebas puntuales.

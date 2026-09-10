@@ -17,15 +17,15 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 ### Semántica de operaciones (OPER)
 
-- [ ] **OPER-01**: `get_tax` cotiza sin dejar rastro en el proveedor — no persiste factura ni snapshot
+- [x] **OPER-01**: `get_tax` cotiza sin dejar rastro en el proveedor — no persiste factura ni snapshot
 - [ ] **OPER-02**: `post_tax` registra una factura confirmada
 - [ ] **OPER-03**: `cancel_tax` cancela una transacción previamente confirmada contra el endpoint v2 correspondiente
-- [ ] **OPER-04**: La validación estricta que hoy protege `get_tax` y `post_tax` de invertirse sigue vigente bajo el contrato v2
-- [ ] **OPER-05**: Una operación inválida o un campo de intención ausente aborta antes de emitir cualquier petición de red
+- [x] **OPER-04**: La validación estricta que hoy protege `get_tax` y `post_tax` de invertirse sigue vigente bajo el contrato v2
+- [x] **OPER-05**: Una operación inválida o un campo de intención ausente aborta antes de emitir cualquier petición de red
 
 ### Rieles anti-falla (SAFE)
 
-- [ ] **SAFE-01**: Toda petición v2 lleva una llave de idempotencia única generada por nexgen
+- [x] **SAFE-01**: Toda petición v2 lleva una llave de idempotencia única generada por nexgen
 - [ ] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
 - [x] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
 - [ ] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
@@ -51,7 +51,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 - [x] **TEST-01**: Existe un runner de pruebas ejecutable con un solo comando
 - [ ] **TEST-02**: Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que se construye, sin salir a la red
-- [ ] **TEST-03**: Hay prueba que falla si `get_tax` llegara a construir una petición que persista factura
+- [x] **TEST-03**: Hay prueba que falla si `get_tax` llegara a construir una petición que persista factura
 - [ ] **TEST-04**: Hay prueba que falla si un monto de la respuesta pasa por conversión a punto flotante
 - [x] **TEST-05**: Hay prueba que verifica el rechazo por descuadre entre prefijo de llave y host
 - [x] **TEST-06**: La suite corre sin credenciales y sin acceso a la red
@@ -111,12 +111,12 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CONN-03 | Phase 1 | Pending |
 | CONN-04 | Phase 1 | Complete |
 | CONN-05 | Phase 1 | Complete |
-| OPER-01 | Phase 1 | Pending |
+| OPER-01 | Phase 1 | Complete |
 | OPER-02 | Phase 2 | Pending |
 | OPER-03 | Phase 2 | Pending |
-| OPER-04 | Phase 1 | Pending |
-| OPER-05 | Phase 1 | Pending |
-| SAFE-01 | Phase 1 | Pending |
+| OPER-04 | Phase 1 | Complete |
+| OPER-05 | Phase 1 | Complete |
+| SAFE-01 | Phase 1 | Complete |
 | SAFE-02 | Phase 2 | Pending |
 | SAFE-03 | Phase 1 | Complete |
 | SAFE-04 | Phase 2 | Pending |
@@ -133,7 +133,7 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | COMP-04 | Phase 1 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Pending |
-| TEST-03 | Phase 1 | Pending |
+| TEST-03 | Phase 1 | Complete |
 | TEST-04 | Phase 2 | Pending |
 | TEST-05 | Phase 1 | Complete |
 | TEST-06 | Phase 1 | Complete |

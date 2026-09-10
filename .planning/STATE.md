@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-10T20:55:49.407Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-09-10T21:10:58.565Z"
 last_activity: 2026-09-10
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 01 (camino-v2-de-punta-a-punta-para-una-cotizaci-n) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-10
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [█████░░░░░] 50%
 *Updated after each plan completion*
 | Phase 01 P01 | 6min | 3 tasks | 8 files |
 | Phase 01 P02 | 16min | 2 tasks | 8 files |
+| Phase 01 P03 | 9min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,11 @@ Decisiones que afectan el trabajo actual:
 - [Phase 01]: _maskApiKey devuelve *** también con una llave de longitud exacta prefijo+4 — Con esa longitud la máscara revelaría la llave entera, que es lo que CFG-05 prohíbe
 - [Phase 01]: El doble de Config gana getApiVersion => 'v1' por omisión — El doble refleja la superficie pública real de Config y las pruebas de congelamiento de v1 siguen verdes sin tocarlas
 - [Phase 01]: .env.example no se creó: los permisos del proyecto niegan escribir ./.env.* y no se rodeó — Es una decisión del dueño del repo sobre esa familia de archivos; el contenido propuesto va en 01-02-SUMMARY.md como acción del usuario
+- [Phase 01]: El helper privado de la llave se llama _generateRequestId, no _generateIdempotencyKey — El criterio de aceptación exige grep 'Idempotency' = 0 sobre el builder (ninguna cabecera de idempotencia inventada) y el nombre de la interfaz del plan lo contradecía; ningún otro plan depende del nombre
+- [Phase 01]: El builder v2 se construye siempre en index.js, fuera del condicional del selector — No valida nada al construirse y es inocuo bajo v1
+- [Phase 01]: La traza 'Cuerpo v2 a enviar:' es un solo console.log con JSON a dos espacios, mismo formato que el cliente v1 — La prueba fija la cadena exacta para que el operador vea el cuerpo tal cual sale, antes de que salga
+- [Phase 01]: Los mensajes de contradicción citan el valor del archivo con JSON.stringify — 'false' (cadena) y false (booleano) se distinguen a simple vista, que es lo que explica por qué === los separó
+- [Phase 01]: buildHandler de tests/argumentParsing.test.js gana un doble del builder en vez de hacer tolerante a _executeV2 ante un builder ausente — Un cableado roto debe fallar, no pasar en silencio; mismo criterio que la wave 2 aplicó a getApiVersion
 
 ### Pending Todos
 
@@ -123,6 +129,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-10T20:55:37.074Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-10T21:10:58.562Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
