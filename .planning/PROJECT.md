@@ -1,0 +1,140 @@
+# nexgen — Puente Sage 300 ↔ API de Impuestos
+
+## What This Is
+
+CLI de Node.js que conecta el ERP (Sage 300 en producción) con una API externa de
+cálculo de impuestos de EE.UU. Lee un JSON de transacción que el área de ERP extrae
+desde Sage, llama a la API, y escribe la respuesta en `OUTPUT_DIR/RESPONSE_<archivo>.json`
+para que el ERP la recoja. No es un demonio: una invocación, una operación, sale.
+
+El proveedor liberó un contrato nuevo (**Synexus Compute v2**) y el encargo actual es
+que nexgen funcione contra esa versión, sin tocar lo que hoy corre en producción.
+
+## Core Value
+
+**El monto de impuesto que nexgen escribe en el archivo de respuesta tiene que ser el
+correcto, y no debe alterar estado en la API del proveedor sin que se haya pedido
+explícitamente.** Todo lo demás —velocidad, ergonomía, cobertura— es secundario:
+esto toca dinero y registros fiscales de un tercero.
+
+## Requirements
+
+### Validated
+
+<!-- Inferido del código existente. Funciona en producción hoy. -->
+
+- ✓ CLI de una invocación / una operación / exit — `index.js`, `src/cli/taxCommandHandler.js`
+- ✓ Tres operaciones: `get_tax` (cotizar), `post_tax` (confirmar), `cancel_tax` (cancelar)
+- ✓ Arquitectura en 5 capas con inyección de dependencias cableada sólo en `index.js`
+- ✓ Validación estricta del campo `Committed` (`get_tax` exige `false`, `post_tax` exige `true`) — `src/validators/taxValidator.js:38-55`
+- ✓ Sanitización de apóstrofes en campos de texto — `src/validators/taxValidator.js:76-95`
+- ✓ Intercambio por archivos: lee JSON de entrada, escribe `RESPONSE_<nombre>.json` conservando la numeración original — `src/storage/fileManager.js`
+- ✓ Configuración por `dotenv`, singleton, con `BASE_URL` / `API_CODE` / `OUTPUT_DIR` requeridos — `src/config/index.js`
+- ✓ Logger winston nivel `error` con rotación diaria — `src/infrastructure/logger.js`
+- ✓ Cliente HTTP único con timeout de 30s y clasificación de errores de red — `src/api/taxApiClient.js`
+- ✓ Integración v1 vigente: `STCCalcV3` / `STCCalcV3_TEST` / `CancelTransaction`, vía `GET` con cuerpo JSON y autenticación `?code=` en la URL
+
+### Active
+
+<!-- Alcance actual. Hipótesis hasta que se verifiquen contra staging. -->
+
+- [ ] Consumir Synexus Compute v2: `POST /api/v1/tax_calculations`, `Authorization: Bearer`, header de entidad
+- [ ] Mapear las tres operaciones al contrato v2 sin perder su semántica actual
+- [ ] `get_tax` debe cotizar **sin persistir** factura en el proveedor (`transaction_type: "sales_estimate"`)
+- [ ] `post_tax` debe confirmar (`transaction_type: "sales_invoice"` + `committed: true`)
+- [ ] `cancel_tax` debe apuntar a `POST /api/v1/invoices/cancel`
+- [ ] Enviar `request_id` (UUID) como llave de idempotencia en cada petición
+- [ ] Validar la correspondencia host ↔ prefijo de llave antes de emitir cualquier petición
+- [ ] Código de entidad parametrizable, nunca hardcodeado, con precedencia definida
+- [ ] Tratar montos y tasas como cadenas decimales de extremo a extremo (cero `parseFloat`)
+- [ ] Pruebas automatizadas del mapeo v1→v2 (sólo esa superficie)
+- [ ] Camino v1 intacto y funcionando durante toda la migración
+
+### Out of Scope
+
+<!-- Fronteras explícitas, con razón, para que no se re-agreguen sin discutirlo. -->
+
+- **`npm audit fix`** (3 vulnerabilidades: `form-data` crítica, `axios` alta, `follow-redirects` moderada) — actualizar axios toca el mismo cliente HTTP que sostiene el `GET`-con-cuerpo de v1, un patrón inusual y sensible a los internos de axios. Arreglarlo aquí pone en riesgo producción. Va en milestone propio con revalidación explícita de v1.
+- **`BASE_URL` obsoleta en la documentación** — `HANDOFF.md` §6.2, `README.md` y `ARCHITECTURE.md` §9 citan un host que devuelve 404 en `STCCalcV3`. Es deuda de v1 y no bloquea v2. Queda anotado en `.planning/codebase/CONCERNS.md`.
+- **Suite de pruebas completa** — el repo no tiene ninguna. Construirla entera compite con el encargo. Sólo se cubre el mapeo v2, que es donde vive el riesgo nuevo.
+- **Flujo de devoluciones / notas de crédito** (`return_invoice`, `return_estimate`) — capacidad nueva del contrato v2 que nexgen no tiene hoy y que nadie ha pedido.
+- **`PATCH /api/v1/invoices/update`** (promover un snapshot a confirmado) — existe en v2, no tiene equivalente en el CLI actual. Se documenta, no se implementa.
+- **Corte de producción a v2** — requiere acceso al servidor, llave de producción y el código de entidad real. Es una decisión operativa del área de ERP, no de este milestone.
+- **"SDCAM"** — mencionado dos veces en la reunión del 9-sep como tema posterior. Cero coincidencias en los cuatro PDF del proveedor. No se infiere: queda como pregunta abierta.
+
+## Context
+
+**Origen del encargo.** Reunión del 9-sep-2026 con el área de ERP (transcripción y
+correos en `data/`, fuera de git). El proveedor liberó el contrato v2 junto con un
+rebrand de marca. El encargo textual fue: revisar qué cambios se requieren para
+actualizar URL y headers, *sobre una rama nueva, sin mover producción*.
+
+**Lo que NO cambia.** La metodología de intercambio por archivos se conserva tal cual:
+el área de ERP genera una extracción desde Sage y deja un JSON; nexgen lo manda como
+cuerpo de la petición, recibe la respuesta y escribe `RESPONSE_<mismo nombre>.json`
+conservando la numeración. La instrucción fue explícita: *"dejemos la versión dos
+funcionando igual que la uno, simplemente ya apuntando"*.
+
+**El contrato v2 ya está vigente en staging.** El rebrand de headers y prefijos de
+llave ya ocurrió del lado del proveedor; no es un cambio futuro que haya que anticipar.
+Hay una prueba real exitosa contra staging (respuesta completa archivada en `data/`)
+que sirve como contrato de referencia y evita ensayo y error.
+
+**El material de referencia son cuatro PDF, no un spec.** No existe Swagger ni OpenAPI:
+se confirmó con el proveedor y se verificó buscando en los cuatro documentos. Los PDF
+fueron impresos desde un sitio HTML con Chrome headless, lo que sugiere que existe
+documentación web detrás del portal. Los PDF viven en `data/` (excluido de git).
+
+**Discrepancias conocidas en la documentación del proveedor.** La guía de migración y
+la referencia de API no coinciden en la ruta del cálculo (`/tax_calculations` con o sin
+`/calculate`). Gana la referencia de API, porque coincide con la prueba real que
+respondió `200`. El host de documentación de errores que la API devuelve en cada
+respuesta de error (`docs_url`) no resuelve en DNS.
+
+**Estado del repositorio.** Rama `feat/synexus-v2-migration` creada, sin commits de
+código todavía. Sin pruebas, sin CI, sin linter. Mapa del código en `.planning/codebase/`
+(7 documentos, ~1,300 líneas, generado 2026-09-10).
+
+## Constraints
+
+- **Compatibilidad**: el camino v1 debe seguir funcionando sin cambios de comportamiento durante toda la migración — es lo que corre en producción y la instrucción fue no moverlo.
+- **Contrato de integración**: el prefijo `RESPONSE_` y la conservación del nombre y numeración del archivo original son contrato con los envoltorios del ERP. No se tocan.
+- **Frontera de ambientes**: el proveedor impone correspondencia dura entre host y prefijo de llave. Cruzarlos devuelve `401`. No hay forma de saltarla.
+- **Acceso geográfico**: el portal y la API del proveedor sólo aceptan peticiones desde EE.UU. y Canadá. Toda verificación contra staging exige el servidor de la empresa o VPN — no se puede hacer desde una máquina local en México.
+- **Tech stack**: Node.js 14+, CommonJS, sin ESM. Tres dependencias en runtime. Sin paso de build.
+- **Idioma**: comentarios y mensajes de error al usuario en español; identificadores de código en inglés camelCase.
+- **Secretos**: `.env` y cualquier valor con pinta de credencial nunca entran a git. `data/` está excluido del repositorio y su contenido no debe citarse en `.planning/`.
+
+## Key Decisions
+
+| Decision | Rationale | Outcome |
+|----------|-----------|---------|
+| Migrar las tres operaciones, no sólo el cálculo | Una migración parcial dejaría `post_tax` apuntando a la API vieja mientras `get_tax` apunta a la nueva: el estado de las transacciones se partiría entre dos proveedores | — Pending |
+| Añadir v2 en paralelo en vez de refactorizar el camino existente | Riesgo cero para producción; permite volver atrás cambiando un selector en vez de revirtiendo commits | — Pending |
+| `get_tax` → `transaction_type: "sales_estimate"`, no sólo `committed: false` | La referencia de API documenta que `committed: false` **igual persiste** un snapshot de factura, y que suprimir la persistencia requiere `sales_estimate`. El default del campo es `sales_invoice`. El mapeo ingenuo crearía un registro por cada cotización | — Pending |
+| Enviar siempre `request_id` como llave de idempotencia | La API cachea la respuesta 5 minutos por `request_id`. Con timeout de 30s contra un backend en la nube, un reintento sin idempotencia puede duplicar un registro fiscal | — Pending |
+| Validar host ↔ prefijo de llave antes de emitir la petición | La frontera de ambientes del proveedor devuelve `401` al cruzarlos. Fallar temprano con mensaje en español es diagnosticable; un `401` a media corrida no lo es | — Pending |
+| Código de entidad por precedencia: flag CLI > variable de entorno > campo del JSON | El valor varía por empresa y por inventario de Sage, así que no puede fijarse. La precedencia acomoda cualquiera de las formas en que el área de ERP decida entregarlo, sin comprometer la decisión hoy | — Pending |
+| Montos y tasas como cadena decimal de extremo a extremo | El contrato v2 devuelve `"49.99"`, no `49.99`. Un `parseFloat` intermedio introduce error de punto flotante en cifras fiscales | — Pending |
+| Aplazar `npm audit fix` a milestone propio | La corrección toca axios, y axios sostiene el `GET`-con-cuerpo de v1. El riesgo de romper producción supera al de las vulnerabilidades en un CLI interno con entrada controlada | — Pending |
+| Cerrar el milestone en "verificado contra staging", no en "producción cortada" | El corte necesita servidor, llave de producción y el entity real: insumos que no controla quien implementa | — Pending |
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
+
+---
+*Last updated: 2026-09-10 after initialization*
