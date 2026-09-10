@@ -37,6 +37,6 @@
   "agent_skills": {},
   "features": {},
   "mode": "interactive",
-  "granularity": "standard",
+  "granularity": "coarse",
   "response_language": "español"
 }

@@ -111,6 +111,7 @@ código todavía. Sin pruebas, sin CI, sin linter. Mapa del código en `.plannin
 |----------|-----------|---------|
 | Migrar las tres operaciones, no sólo el cálculo | Una migración parcial dejaría `post_tax` apuntando a la API vieja mientras `get_tax` apunta a la nueva: el estado de las transacciones se partiría entre dos proveedores | — Pending |
 | Añadir v2 en paralelo en vez de refactorizar el camino existente | Riesgo cero para producción; permite volver atrás cambiando un selector en vez de revirtiendo commits | — Pending |
+| v1 es el comportamiento por defecto; v2 se activa con un interruptor en la configuración de entorno | El envoltorio del ERP invoca `node index.js get_tax <archivo>` sin selector y no puede cambiarse, así que v1 tiene que seguir siendo el default: exigir el selector siempre rompería producción. Poner el interruptor en la configuración de entorno además satisface VERIF-04, porque revertir a v1 pasa a ser cambiar una línea de configuración sin desplegar código. Un argumento de línea de comandos lo sobreescribe para pruebas puntuales. Cierra la tensión CFG-03 ↔ COMP-01 | — Pending |
 | `get_tax` → `transaction_type: "sales_estimate"`, no sólo `committed: false` | La referencia de API documenta que `committed: false` **igual persiste** un snapshot de factura, y que suprimir la persistencia requiere `sales_estimate`. El default del campo es `sales_invoice`. El mapeo ingenuo crearía un registro por cada cotización | — Pending |
 | Enviar siempre `request_id` como llave de idempotencia | La API cachea la respuesta 5 minutos por `request_id`. Con timeout de 30s contra un backend en la nube, un reintento sin idempotencia puede duplicar un registro fiscal | — Pending |
 | Validar host ↔ prefijo de llave antes de emitir la petición | La frontera de ambientes del proveedor devuelve `401` al cruzarlos. Fallar temprano con mensaje en español es diagnosticable; un `401` a media corrida no lo es | — Pending |
@@ -137,4 +138,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-10 after initialization*
+*Last updated: 2026-09-10 — se registra la resolución de CFG-03 (v1 por omisión, v2 por interruptor de entorno)*

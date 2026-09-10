@@ -114,6 +114,22 @@ the full table.
 - `RUNBOOK.md` — operational procedures (Spanish).
 - `docs/MEMORY.md` — historical decisions and conventions.
 
+## Plan técnico: GSD es el dueño
+
+Desde 2026-09-10 este repo usa GSD. **El plan técnico vive en `.planning/`, no
+aquí.** Este archivo describe cómo es el código; `.planning/` describe qué se
+está construyendo y por qué. No dupliques entre los dos.
+
+- `.planning/PROJECT.md` — contexto, requisitos validados vs activos, decisiones clave.
+- `.planning/ROADMAP.md` — fases y criterios de éxito.
+- `.planning/REQUIREMENTS.md` — los requisitos con ID y su trazabilidad a fases.
+- `.planning/STATE.md` — dónde va el trabajo. Léelo primero al retomar sesión.
+- `.planning/codebase/` — mapa del código en 7 documentos (generado, regenerable
+  con `/gsd-map-codebase`).
+
+Milestone en curso: **migración a Synexus Compute v2**, 3 fases. El camino v1 que
+corre en producción no se toca — ver `COMP-01` en `REQUIREMENTS.md`.
+
 ## Workflow expectations for Claude
 
 - Behavior changes need an explicit ask. Docs/meta changes can be

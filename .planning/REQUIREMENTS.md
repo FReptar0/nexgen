@@ -36,7 +36,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 - [ ] **CFG-01**: El código de entidad se resuelve por precedencia — argumento de línea de comandos, luego variable de entorno, luego campo del JSON de entrada — y nunca está escrito en el código
 - [ ] **CFG-02**: Si el código de entidad no se resuelve por ninguna vía, la corrida aborta con un mensaje en español que dice cómo proporcionarlo
-- [ ] **CFG-03**: El operador puede elegir explícitamente entre el camino v1 y el v2; no hay selección implícita ni por omisión
+- [ ] **CFG-03**: v2 nunca se activa por omisión — v1 es el comportamiento por defecto cuando no se indica contrato, y v2 requiere activación explícita. El interruptor de despliegue vive en la configuración de entorno; un argumento de línea de comandos lo sobreescribe para pruebas puntuales.
 - [ ] **CFG-04**: Si falta cualquier variable requerida por el camino v2, la corrida aborta al arrancar, nombrando cuáles faltan
 - [ ] **CFG-05**: Ninguna credencial aparece en la salida estándar ni en los archivos de log
 
@@ -101,21 +101,71 @@ Diferidos. Registrados, fuera del roadmap actual.
 
 ## Traceability
 
+Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONN-01 … CONN-05 | TBD | Pending |
-| OPER-01 … OPER-05 | TBD | Pending |
-| SAFE-01 … SAFE-06 | TBD | Pending |
-| CFG-01 … CFG-05 | TBD | Pending |
-| COMP-01 … COMP-04 | TBD | Pending |
-| TEST-01 … TEST-06 | TBD | Pending |
-| VERIF-01 … VERIF-04 | TBD | Pending |
+| CONN-01 | Phase 1 | Pending |
+| CONN-02 | Phase 1 | Pending |
+| CONN-03 | Phase 1 | Pending |
+| CONN-04 | Phase 1 | Pending |
+| CONN-05 | Phase 1 | Pending |
+| OPER-01 | Phase 1 | Pending |
+| OPER-02 | Phase 2 | Pending |
+| OPER-03 | Phase 2 | Pending |
+| OPER-04 | Phase 1 | Pending |
+| OPER-05 | Phase 1 | Pending |
+| SAFE-01 | Phase 1 | Pending |
+| SAFE-02 | Phase 2 | Pending |
+| SAFE-03 | Phase 1 | Pending |
+| SAFE-04 | Phase 2 | Pending |
+| SAFE-05 | Phase 2 | Pending |
+| SAFE-06 | Phase 2 | Pending |
+| CFG-01 | Phase 1 | Pending |
+| CFG-02 | Phase 1 | Pending |
+| CFG-03 | Phase 1 | Pending |
+| CFG-04 | Phase 1 | Pending |
+| CFG-05 | Phase 1 | Pending |
+| COMP-01 | Phase 1 | Pending |
+| COMP-02 | Phase 2 | Pending |
+| COMP-03 | Phase 2 | Pending |
+| COMP-04 | Phase 1 | Pending |
+| TEST-01 | Phase 1 | Pending |
+| TEST-02 | Phase 2 | Pending |
+| TEST-03 | Phase 1 | Pending |
+| TEST-04 | Phase 2 | Pending |
+| TEST-05 | Phase 1 | Pending |
+| TEST-06 | Phase 1 | Pending |
+| VERIF-01 | Phase 2 | Pending |
+| VERIF-02 | Phase 3 | Pending |
+| VERIF-03 | Phase 3 | Pending |
+| VERIF-04 | Phase 3 | Pending |
+
+**Requisitos por fase:**
+
+| Fase | Nombre | Requisitos |
+|------|--------|-----------|
+| Phase 1 | Camino v2 de punta a punta para una cotización | 21 |
+| Phase 2 | Confirmar, cancelar y devolver la respuesta íntegra | 11 |
+| Phase 3 | Verificación contra staging y corte documentado | 3 |
 
 **Coverage:**
-- v1 requirements: 33 total
-- Mapped to phases: 0 (roadmap pendiente)
-- Unmapped: 33 ⚠️
+- v1 requirements: 35 total
+- Mapped to phases: 35 ✓
+- Unmapped: 0
+
+> Corrección: la versión anterior de este documento declaraba 33 requisitos v1. El
+> conteo real de identificadores en la sección "v1 Requirements" es 35 (CONN 5, OPER 5,
+> SAFE 6, CFG 5, COMP 4, TEST 6, VERIF 4). No se añadió ni se quitó ningún requisito;
+> sólo se corrigió la suma.
+
+> Consolidación a 3 fases (2026-09-10): el roadmap pasó de 6 fases a 3 por granularidad
+> `coarse`. Las fases 1+2+3 anteriores se fundieron en la nueva Phase 1, las 4+5 en la
+> nueva Phase 2, y la 6 quedó como Phase 3. **Ningún requisito se eliminó, fusionó ni
+> difirió**; sólo cambió a qué fase apunta cada uno. La única reescritura es CFG-03, que
+> se cerró en su forma decidida —v1 por omisión, v2 por activación explícita desde la
+> configuración de entorno— en vez de dejar la tensión con COMP-01 abierta a una fase.
 
 ---
 *Requirements defined: 2026-09-10*
-*Last updated: 2026-09-10 after initialization*
+*Last updated: 2026-09-10 tras la consolidación del roadmap a 3 fases y el cierre de CFG-03*
