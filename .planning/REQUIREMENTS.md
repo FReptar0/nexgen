@@ -77,6 +77,7 @@ Diferidos. Registrados, fuera del roadmap actual.
 - **DEBT-01**: Corregir la URL base obsoleta que la documentación del repositorio sigue citando
 - **DEBT-02**: Incluir marca de tiempo en el nombre del archivo de respuesta para evitar sobrescritura en corridas concurrentes
 - **DEBT-03**: Recalcular la fecha del log en cada escritura, para que un proceso que cruce la medianoche no siga escribiendo en el archivo del día anterior
+- **DEBT-04**: Dejar de imprimir la credencial de v1 a la salida estándar — `src/api/taxApiClient.js:32` imprime la URL completa, que en v1 incluye `?code=<API_CODE>`. No se corrige durante este milestone porque cambiaría la salida de v1 y `COMP-01` lo prohíbe; `CFG-05` quedó acotado al camino v2 por esa razón
 
 ### Capacidades nuevas del contrato v2 (NEW)
 
