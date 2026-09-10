@@ -114,6 +114,39 @@ escritura al archivo de salida (Fase 2), y toda verificación en vivo (Fase 3).
   comportamiento actual parece un defecto, se congela igual y se anota — corregirlo es
   otro milestone.
 
+### Nombre del header de entidad — resuelto, no elegir por parecido
+
+- **El header correcto es `X-Synexus-Entity`.** No `X-Syntax-Entity`.
+- La colección de Postman trae los dos porque fue escrita anticipando el cambio de
+  marca, con el nuevo desactivado. Esa colección quedó desfasada: el cambio ya ocurrió
+  del lado del proveedor.
+- La referencia de API documenta el nombre viejo porque es anterior al cambio de marca.
+- Evidencia que decide: existe una petición real contra staging, del 9-sep-2026, que usó
+  `X-Synexus-Entity` y devolvió `200` con cuerpo completo. Una respuesta real gana sobre
+  documentación desfasada. El correo con esa petición y su respuesta está en `data/`.
+- Corolario: el prefijo de llave vigente también es el de la marca nueva, no el anterior.
+
+### No replicar el patrón singleton de `Config` en el camino v2
+
+- `src/config/index.js:91` exporta una instancia ya construida, y ese constructor valida
+  variables de entorno, es decir **lanza en tiempo de `require`**.
+- Replicar esa forma para v2 rompería toda corrida v1 en un servidor que no tenga las
+  variables de v2 configuradas, y haría imposible `TEST-06` (suite sin credenciales).
+- La configuración v2 **exporta la clase**, e `index.js` la construye únicamente cuando
+  el selector ya resolvió v2.
+
+### Restricciones que heredan las pruebas
+
+- Las pruebas no pueden hacer `require` de `src/config` (lanza al cargar) ni de
+  `index.js` (ejecuta `main()` al cargarse).
+- Los dobles de prueba son objetos literales. Es viable precisamente porque toda clase
+  recibe a sus colaboradores por constructor.
+- **El directorio de pruebas no puede llamarse `test-files`**: ese nombre ya está en
+  `.gitignore` y las pruebas quedarían fuera de git sin aviso. Usar `tests/` o
+  `__tests__/`.
+- Jest se fija en `29.7.0`, cuyo campo `engines` es `^14.15.0 || ^16.10.0 || >=18.0.0`
+  — coincide con el piso de Node que asumimos. Jest 30 sube ese piso y no sirve.
+
 ### Claude's Discretion
 
 - Nombres exactos de archivos y clases nuevos, respetando el camelCase en inglés y la
@@ -177,9 +210,11 @@ escritura al archivo de salida (Fase 2), y toda verificación en vivo (Fase 3).
 <specifics>
 ## Specific Ideas
 
-- Existe una respuesta real de staging archivada en `data/`, obtenida el 9-sep-2026, que
-  sirve como fixture de contrato. En esta fase se usa para confirmar la forma de la
-  respuesta; su consumo formal es de la Fase 2 (`VERIF-01`).
+- Existe una respuesta real de staging obtenida el 9-sep-2026, que sirve como fixture de
+  contrato. **Ojo: hoy no existe como archivo `.json`** — vive dentro de un PDF de correo
+  en `data/`. Extraerla a un `.json` es trabajo pendiente, pero **no bloquea esta fase**:
+  su consumo formal es `VERIF-01`, de la Fase 2. En esta fase sólo se usa como referencia
+  de la forma esperada.
 - Esa misma respuesta muestra impuesto `0.00` con `exemption.source: "no_nexus"`. **Un
   cero ahí no es un defecto**: la entidad de sandbox no tiene nexo en ese estado. Ninguna
   prueba debe tratar un cero como fallo.
