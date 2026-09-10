@@ -51,7 +51,7 @@ class SynexusConfig {
 
         if (missing.length > 0) {
             const errorMsg = `Variables de entorno faltantes para el contrato v2: ${missing.join(', ')}. ` +
-                'Defínalas en el archivo .env de la raíz del proyecto (vea .env.example).';
+                'Defínalas en el archivo .env de la raíz del proyecto.';
             console.error(errorMsg);
             throw new Error(errorMsg);
         }
