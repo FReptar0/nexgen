@@ -1,0 +1,498 @@
+// tests/v2IntentValidation.test.js
+// La validación de los campos de intención bajo el contrato v2 y el orden de la
+// rama v2 de execute():
+//   1. validateV2IntentFields como método hermano de validateCommittedField:
+//      guardia de archivo v1, regla de contradicción (OPER-04 bajo v2) y el
+//      campo request_id como propiedad de nexgen.
+//   2. El recorrido de _executeV2 con el TaxValidator REAL: qué se llama, en
+//      qué orden, con qué argumentos, y qué NO se llama nunca (validate y
+//      validateCommittedField).
+//
+// Ningún archivo de prueba requiere index.js (ejecuta main() al cargarse).
+const TaxValidator = require('../src/validators/taxValidator');
+const TaxCommandHandler = require('../src/cli/taxCommandHandler');
+const SynexusRequestBuilder = require('../src/api/synexusRequestBuilder');
+const fakes = require('./helpers/fakes');
+
+// La intención que devuelve SynexusRequestBuilder.getIntentFor('get_tax'). Aquí
+// va literal a propósito: el validador la recibe como argumento y no guarda su
+// propia copia, así que la prueba unitaria tampoco depende del builder.
+const expectedIntent = { transaction_type: 'sales_estimate', committed: false };
+
+// Cuerpo con forma v2, calcado del ejemplo de postman/synexus-v2-api.postman_collection.json.
+// Sin Committed, committed, transaction_type ni request_id: es exactamente el
+// archivo que deja el área de ERP, y el caso más importante de este archivo.
+const createV2Body = () => ({
+    invoice_id: 'DEMO-001',
+    customer_id: 'CUST-1',
+    to_state: 'TX',
+    to_zip: '75001',
+    cart: [
+        { item_id: 'SKU-1', price: 49.99, quantity: 1, tax_code: 'TPP' }
+    ]
+});
+
+// Cuerpo con forma v1: Committed en mayúscula y sin campos en minúsculas.
+const createV1Body = () => ({
+    Committed: false,
+    cartID: 'CART-1'
+});
+
+const v1FileGuardMessage = 'parece del contrato v1';
+
+let consoleLogSpy;
+let consoleErrorSpy;
+
+beforeEach(() => {
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+});
+
+describe('validateV2IntentFields — método hermano de validateCommittedField, sólo para la rama v2', () => {
+    let validator;
+    let logger;
+
+    beforeEach(() => {
+        logger = fakes.createFakeLogger();
+        validator = new TaxValidator(logger);
+    });
+
+    describe('el caso normal: el archivo que deja el área de ERP', () => {
+        it('un cuerpo con forma v2, sin ningún campo de intención, NO lanza', () => {
+            expect(() => validator.validateV2IntentFields('get_tax', createV2Body(), expectedIntent)).not.toThrow();
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+            expect(logger.error).not.toHaveBeenCalled();
+        });
+
+        it('no muta el cuerpo: sigue sin campos de intención después de validar', () => {
+            const body = createV2Body();
+            const snapshot = JSON.parse(JSON.stringify(body));
+
+            validator.validateV2IntentFields('get_tax', body, expectedIntent);
+
+            expect(body).toEqual(snapshot);
+        });
+    });
+
+    describe('guardia de archivo v1: Committed con mayúscula', () => {
+        it('con Committed: true lanza diciendo que el archivo parece del contrato v1 y cita "Committed"', () => {
+            const body = createV2Body();
+            body.Committed = true;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow(v1FileGuardMessage);
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"Committed"');
+        });
+
+        it('con Committed: false lanza igual: la guardia comprueba presencia, no veracidad', () => {
+            const body = createV2Body();
+            body.Committed = false;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow(v1FileGuardMessage);
+        });
+
+        it('con un archivo v1 puro (Committed: false, sin campos en minúsculas) el mensaje es el de la guardia', () => {
+            expect(() => validator.validateV2IntentFields('get_tax', createV1Body(), expectedIntent)).toThrow(v1FileGuardMessage);
+        });
+
+        it('la guardia corre ANTES que las comprobaciones de contradicción: con Committed y transaction_type contradictorio, el mensaje es el de la guardia', () => {
+            const body = createV2Body();
+            body.Committed = false;
+            body.transaction_type = 'sales_invoice';
+            body.committed = true;
+
+            let caught = null;
+            try {
+                validator.validateV2IntentFields('get_tax', body, expectedIntent);
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain(v1FileGuardMessage);
+            expect(caught.message).not.toContain('sales_invoice');
+        });
+
+        it('el mensaje orienta: o el archivo está en forma v1 o el selector debería ser v1', () => {
+            const body = createV2Body();
+            body.Committed = false;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow(/selector/);
+        });
+
+        it('usa el trío del repositorio: console.error + logger.error + throw', () => {
+            const body = createV2Body();
+            body.Committed = false;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow();
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            expect(logger.error).toHaveBeenCalledTimes(1);
+            expect(logger.error.mock.calls[0][0]).toContain(v1FileGuardMessage);
+        });
+    });
+
+    describe('transaction_type: contradecir aborta, coincidir se tolera', () => {
+        it('get_tax con transaction_type sales_invoice lanza nombrando el valor del archivo y el de la operación', () => {
+            const body = createV2Body();
+            body.transaction_type = 'sales_invoice';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('sales_invoice');
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('sales_estimate');
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"transaction_type"');
+        });
+
+        it('get_tax con transaction_type sales_estimate (coincidente) NO lanza', () => {
+            const body = createV2Body();
+            body.transaction_type = 'sales_estimate';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).not.toThrow();
+        });
+
+        it('la contradicción se compara con ===: una variante de mayúsculas también contradice', () => {
+            const body = createV2Body();
+            body.transaction_type = 'Sales_Estimate';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"transaction_type"');
+        });
+
+        it('el mensaje explica por qué se aborta en vez de sobreescribir', () => {
+            const body = createV2Body();
+            body.transaction_type = 'sales_invoice';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow(/sobreescribir/);
+        });
+    });
+
+    describe('committed: OPER-04 bajo el contrato v2, con comparación estricta', () => {
+        it('get_tax con committed: true lanza, y el mensaje nombra committed', () => {
+            const body = createV2Body();
+            body.committed = true;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"committed"');
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('get_tax');
+        });
+
+        it('get_tax con committed: false (coincidente) NO lanza', () => {
+            const body = createV2Body();
+            body.committed = false;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).not.toThrow();
+        });
+
+        it('la comparación es estricta: committed "false" (cadena) contradice a false (booleano)', () => {
+            const body = createV2Body();
+            body.committed = 'false';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"committed"');
+        });
+
+        it('la comparación es estricta: committed 0 contradice a false', () => {
+            const body = createV2Body();
+            body.committed = 0;
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"committed"');
+        });
+
+        it('la contradicción se mide contra la intención recibida, no contra una copia propia del validador', () => {
+            const body = createV2Body();
+            body.committed = true;
+            const otherIntent = { transaction_type: 'sales_invoice', committed: true };
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, otherIntent)).not.toThrow();
+        });
+    });
+
+    describe('request_id: campo de nexgen', () => {
+        it('un cuerpo que ya trae request_id lanza: uno heredado rompería la idempotencia', () => {
+            const body = createV2Body();
+            body.request_id = '11111111-1111-4111-8111-111111111111';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"request_id"');
+        });
+
+        it('request_id vacío también lanza: la presencia es lo que se rechaza', () => {
+            const body = createV2Body();
+            body.request_id = '';
+
+            expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"request_id"');
+        });
+    });
+
+    describe('aislamiento respecto a v1', () => {
+        it('validate() de v1 NO llama a validateV2IntentFields', () => {
+            const spy = jest.spyOn(validator, 'validateV2IntentFields');
+
+            validator.validate('get_tax', createV1Body());
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+
+        it('validateCommittedField sigue rechazando un cuerpo v2 con el mensaje literal de v1: no fue modificado', () => {
+            expect(() => validator.validateCommittedField('get_tax', createV2Body()))
+                .toThrow(new Error('Para la operación get_tax, el valor "Committed" debe ser false.'));
+        });
+
+        it('la lista de operaciones sigue siendo la de siempre', () => {
+            expect(validator.getValidOperations()).toEqual(['get_tax', 'post_tax', 'cancel_tax']);
+        });
+    });
+});
+
+describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidator real', () => {
+    // El validador es el TaxValidator REAL con espías que dejan pasar la llamada.
+    // Es deliberado: es lo que prueba que un cuerpo SIN Committed atraviesa la
+    // rama v2 sin ser rechazado por la validación de v1. Con un doble, el caso
+    // sería una tautología sobre el doble.
+    const wiringGuardMessage = 'Falta inyectar el cliente v2';
+    const bodyTracePrefix = 'Cuerpo v2 a enviar:';
+
+    /**
+     * Arma el manejador con el validador real espiado y dobles literales para
+     * el resto. requestBuilder es un doble con getIntentFor y buildRequestBody.
+     * @param {*} requestBody - Lo que readJsonFile devolverá
+     * @param {Object} [builderOverrides] - Reemplazos para el doble del builder
+     * @returns {Object} handler y colaboradores para las aserciones
+     */
+    const buildHandler = (requestBody, builderOverrides) => {
+        const validator = new TaxValidator(fakes.createFakeLogger());
+        const spies = {
+            validate: jest.spyOn(validator, 'validate'),
+            validateCommittedField: jest.spyOn(validator, 'validateCommittedField'),
+            validateRequestBody: jest.spyOn(validator, 'validateRequestBody'),
+            sanitizeStringFields: jest.spyOn(validator, 'sanitizeStringFields'),
+            validateV2IntentFields: jest.spyOn(validator, 'validateV2IntentFields')
+        };
+        const fileManager = {
+            exists: () => true,
+            readJsonFile: () => requestBody,
+            ensureDirectory: jest.fn(),
+            getResponseFileName: jest.fn(() => '/tmp/nexgen-tests-output/RESPONSE_a.json'),
+            writeJsonFile: jest.fn()
+        };
+        const apiClient = {
+            makeRequest: jest.fn(async () => ({ TotalTax: '0.00' }))
+        };
+        const synexusConfig = {
+            resolveEntityCode: jest.fn(() => 'USA'),
+            printProfile: jest.fn()
+        };
+        const requestBuilder = Object.assign({
+            getIntentFor: jest.fn(() => ({ transaction_type: 'sales_estimate', committed: false })),
+            buildRequestBody: jest.fn((operation, body) => Object.assign({}, body, {
+                transaction_type: 'sales_estimate',
+                committed: false,
+                request_id: '22222222-2222-4222-8222-222222222222'
+            }))
+        }, builderOverrides || {});
+        const handler = new TaxCommandHandler(
+            fakes.createFakeConfig(),
+            fakes.createFakeLogger(),
+            fileManager,
+            validator,
+            apiClient,
+            synexusConfig,
+            requestBuilder
+        );
+
+        return { handler, spies, apiClient, synexusConfig, requestBuilder };
+    };
+
+    const runV2 = (handler) => handler.execute(['get_tax', 'a.json', '--api-version=v2']);
+
+    it('con un cuerpo v2 recorre la rama completa en el orden del contrato y se detiene en la guardia de cableado', async () => {
+        const { handler, spies, apiClient, synexusConfig, requestBuilder } = buildHandler(createV2Body());
+
+        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+        // Lo que NO se llama nunca bajo v2
+        expect(spies.validate).not.toHaveBeenCalled();
+        expect(spies.validateCommittedField).not.toHaveBeenCalled();
+        expect(apiClient.makeRequest).not.toHaveBeenCalled();
+
+        // Lo que se llama, exactamente una vez cada uno
+        expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
+        expect(spies.sanitizeStringFields).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.resolveEntityCode).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.printProfile).toHaveBeenCalledTimes(1);
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledTimes(1);
+        expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+        expect(requestBuilder.buildRequestBody).toHaveBeenCalledTimes(1);
+
+        // El orden: validar → sanear → entidad → perfil → intención → validar intención → construir
+        const order = [
+            spies.validateRequestBody,
+            spies.sanitizeStringFields,
+            synexusConfig.resolveEntityCode,
+            synexusConfig.printProfile,
+            requestBuilder.getIntentFor,
+            spies.validateV2IntentFields,
+            requestBuilder.buildRequestBody
+        ].map(fn => fn.mock.invocationCallOrder[0]);
+        const sorted = [...order].sort((a, b) => a - b);
+        expect(order).toEqual(sorted);
+    });
+
+    it('pasa al validador la operación, el cuerpo SANEADO y la MISMA intención que devolvió el builder', async () => {
+        const { handler, spies, requestBuilder } = buildHandler(createV2Body());
+
+        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+        const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
+        const intent = requestBuilder.getIntentFor.mock.results[0].value;
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('get_tax');
+        expect(spies.validateV2IntentFields).toHaveBeenCalledWith('get_tax', sanitizedBody, intent);
+        expect(spies.validateV2IntentFields.mock.calls[0][2]).toBe(intent);
+        expect(spies.validateV2IntentFields.mock.calls[0][1]).toBe(sanitizedBody);
+    });
+
+    it('construye el cuerpo con la operación y el cuerpo saneado, no con el crudo', async () => {
+        const rawBody = createV2Body();
+        rawBody.customer_id = "Plummer's";
+        const { handler, spies, requestBuilder } = buildHandler(rawBody);
+
+        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+        const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
+        expect(requestBuilder.buildRequestBody).toHaveBeenCalledWith('get_tax', sanitizedBody);
+        expect(requestBuilder.buildRequestBody.mock.calls[0][1]).not.toBe(rawBody);
+        expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).toBe("Plummer\\'s");
+    });
+
+    it('imprime el cuerpo construido en la salida estándar, con JSON indentado a dos espacios, antes de la guardia', async () => {
+        const { handler, requestBuilder } = buildHandler(createV2Body());
+
+        await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+        const builtBody = requestBuilder.buildRequestBody.mock.results[0].value;
+        const traceCalls = consoleLogSpy.mock.calls
+            .map((call, index) => ({ call, index }))
+            .filter(entry => typeof entry.call[0] === 'string' && entry.call[0].startsWith(bodyTracePrefix));
+
+        expect(traceCalls).toHaveLength(1);
+        expect(traceCalls[0].call).toHaveLength(1);
+        expect(traceCalls[0].call[0]).toBe(`${bodyTracePrefix} ${JSON.stringify(builtBody, null, 2)}`);
+        expect(traceCalls[0].call[0]).toContain('"transaction_type": "sales_estimate"');
+        expect(traceCalls[0].call[0]).toContain('"request_id"');
+
+        // Después de construir el cuerpo (invocationCallOrder es global entre mocks)
+        const traceOrder = consoleLogSpy.mock.invocationCallOrder[traceCalls[0].index];
+        expect(traceOrder).toBeGreaterThan(requestBuilder.buildRequestBody.mock.invocationCallOrder[0]);
+    });
+
+    it('con un archivo que contradice la operación, aborta ANTES de llamar a buildRequestBody', async () => {
+        const body = createV2Body();
+        body.transaction_type = 'sales_invoice';
+        const { handler, spies, requestBuilder } = buildHandler(body);
+
+        await expect(runV2(handler)).rejects.toThrow('sales_invoice');
+
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledTimes(1);
+        expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(false);
+    });
+
+    it('con committed invertido en el archivo, aborta nombrando committed y sin construir el cuerpo (OPER-04 bajo v2)', async () => {
+        const body = createV2Body();
+        body.committed = true;
+        const { handler, requestBuilder } = buildHandler(body);
+
+        await expect(runV2(handler)).rejects.toThrow('"committed"');
+
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+    });
+
+    it('con un archivo del contrato v1 bajo la rama v2, lanza el mensaje de la guardia y buildRequestBody no se llama', async () => {
+        const { handler, spies, requestBuilder } = buildHandler(createV1Body());
+
+        await expect(runV2(handler)).rejects.toThrow(v1FileGuardMessage);
+
+        expect(spies.validate).not.toHaveBeenCalled();
+        expect(spies.validateCommittedField).not.toHaveBeenCalled();
+        expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+    });
+
+    it('con una operación sin mapeo, getIntentFor aborta antes de validar la intención y de construir nada', async () => {
+        const noMappingMessage = 'La operación "post_tax" todavía no tiene mapeo de intención en el contrato v2';
+        const { handler, spies, requestBuilder } = buildHandler(createV2Body(), {
+            getIntentFor: jest.fn(() => { throw new Error(noMappingMessage); })
+        });
+
+        await expect(handler.execute(['post_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('post_tax');
+
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('post_tax');
+        expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(spies.validate).not.toHaveBeenCalled();
+    });
+
+    it('con readJsonFile devolviendo null, falla en validateRequestBody y no consulta la intención', async () => {
+        const { handler, requestBuilder } = buildHandler(null);
+
+        await expect(runV2(handler)).rejects.toThrow('El cuerpo de la petición no es un objeto válido');
+
+        expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+    });
+
+    describe('con el SynexusRequestBuilder real', () => {
+        const buildRealHandler = (requestBody) => {
+            const logger = fakes.createFakeLogger();
+            const validator = new TaxValidator(logger);
+            const spies = {
+                validate: jest.spyOn(validator, 'validate'),
+                validateCommittedField: jest.spyOn(validator, 'validateCommittedField'),
+                validateV2IntentFields: jest.spyOn(validator, 'validateV2IntentFields')
+            };
+            const requestBuilder = new SynexusRequestBuilder(logger);
+            const handler = new TaxCommandHandler(
+                fakes.createFakeConfig(),
+                logger,
+                { exists: () => true, readJsonFile: () => requestBody },
+                validator,
+                { makeRequest: jest.fn() },
+                { resolveEntityCode: jest.fn(() => 'USA'), printProfile: jest.fn() },
+                requestBuilder
+            );
+            return { handler, spies };
+        };
+
+        it('get_tax con un archivo v2 llega a la guardia de cableado con el cuerpo tipado como sales_estimate y con request_id', async () => {
+            const { handler, spies } = buildRealHandler(createV2Body());
+
+            await expect(runV2(handler)).rejects.toThrow(wiringGuardMessage);
+
+            const trace = consoleLogSpy.mock.calls.find(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix));
+            expect(trace).toBeDefined();
+            const printedBody = JSON.parse(trace[0].slice(bodyTracePrefix.length));
+            expect(printedBody.transaction_type).toBe('sales_estimate');
+            expect(printedBody.transaction_type).not.toBe('sales_invoice');
+            expect(printedBody.committed).toBe(false);
+            expect(printedBody.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+            expect(printedBody.invoice_id).toBe('DEMO-001');
+            expect(spies.validate).not.toHaveBeenCalled();
+            expect(spies.validateCommittedField).not.toHaveBeenCalled();
+        });
+
+        it('post_tax bajo v2 aborta en el mapeo de intención, sin validar intención y sin llegar a la guardia', async () => {
+            const { handler, spies } = buildRealHandler(createV2Body());
+
+            let caught = null;
+            try {
+                await handler.execute(['post_tax', 'a.json', '--api-version=v2']);
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('post_tax');
+            expect(caught.message).not.toContain(wiringGuardMessage);
+            expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+        });
+    });
+});
