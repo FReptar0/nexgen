@@ -72,7 +72,7 @@ Ninguno aún.
   dueño de una tabla de traducción entre dos contratos de proveedor. Consultado el
   2026-09-10; **los planes de Phase 1 quedan en pausa hasta la respuesta.**
 - **El mecanismo del código de entidad quedó explícitamente sin definir** en la reunión del 9-sep. CFG-01 fija la precedencia (argumento > variable de entorno > campo del JSON), pero `Config` es hoy un singleton de proceso sin lugar para un valor por petición: su superficie pública probablemente cambie en Phase 1 y eso repercute en `TaxApiClient` y en el parseo de argumentos del CLI.
-- **Discrepancia en la ruta de cálculo v2** entre la guía de migración y la referencia de API (`/tax_calculations` con o sin `/calculate`). Gana la referencia de API porque coincide con la prueba real que respondió `200`. A confirmar en Phase 3.
+- ~~Discrepancia en la ruta de cálculo v2~~ **Resuelto 2026-09-10:** no era discrepancia. La referencia de API (pág. 9) documenta `/api/v1/tax_calculations/calculate` como **alias oficial** de `/api/v1/tax_calculations`. Las dos rutas funcionan; la guía de migración simplemente usó el alias. nexgen usa la ruta canónica sin `/calculate`.
 - **Sin acceso a staging desde la máquina local.** Toda verificación en vivo depende del servidor de la empresa y del área de ERP. No hay forma de saltar esta frontera.
 - **El repositorio no tiene ninguna prueba, CI ni linter.** Phase 1 construye la primera infraestructura de pruebas desde cero; no hay andamiaje previo que extender.
 

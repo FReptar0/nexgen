@@ -85,11 +85,16 @@ se confirmó con el proveedor y se verificó buscando en los cuatro documentos. 
 fueron impresos desde un sitio HTML con Chrome headless, lo que sugiere que existe
 documentación web detrás del portal. Los PDF viven en `data/` (excluido de git).
 
-**Discrepancias conocidas en la documentación del proveedor.** La guía de migración y
-la referencia de API no coinciden en la ruta del cálculo (`/tax_calculations` con o sin
-`/calculate`). Gana la referencia de API, porque coincide con la prueba real que
-respondió `200`. El host de documentación de errores que la API devuelve en cada
-respuesta de error (`docs_url`) no resuelve en DNS.
+**Sobre la documentación del proveedor.** Las dos rutas de cálculo que aparecen en los
+PDF (`/tax_calculations` y `/tax_calculations/calculate`) son equivalentes: la
+referencia de API documenta la segunda como alias oficial de la primera. nexgen usa la
+canónica, sin `/calculate`. La referencia de API trae la tabla completa de campos de
+petición v2 (45 campos con tipo y obligatoriedad; sólo `invoice_id`, `customer_id`,
+`to_state` y `to_zip` son obligatorios a nivel raíz), así que el contrato de destino
+está íntegramente especificado. **Lo que no está en ningún PDF es la forma del JSON que
+produce hoy la extracción de Sage** — eso sólo existe en los archivos reales del ERP.
+El host de documentación de errores que la API devuelve en cada respuesta de error
+(`docs_url`) no resuelve en DNS.
 
 **Estado del repositorio.** Rama `feat/synexus-v2-migration` creada, sin commits de
 código todavía. Sin pruebas, sin CI, sin linter. Mapa del código en `.planning/codebase/`
