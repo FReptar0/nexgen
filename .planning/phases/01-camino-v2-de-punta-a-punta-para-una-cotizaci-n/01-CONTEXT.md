@@ -268,6 +268,14 @@ escritura al archivo de salida (Fase 2), y toda verificación en vivo (Fase 3).
   decidida (argumento CLI > variable de entorno > campo del JSON) absorbe cualquiera de
   las tres formas en que lo entreguen, pero la superficie pública de `Config` puede tener
   que cambiar, con repercusión en el parseo de argumentos del CLI.
+- **`tax_code` es obligatorio en cada línea del `cart[]` del contrato v2.** Si falta o va
+  vacío, el proveedor rechaza toda la petición con `422 tax_code_missing`. nexgen no lo
+  inyecta ni lo valida —el cuerpo es del área de ERP— así que depende de que la
+  extracción de Sage lo emita siempre. El cuerpo de referencia del 9-sep sí lo trae
+  (`"TPP"`). **A confirmar con el área de ERP junto con la forma del archivo**, antes de la
+  Fase 3, para no descubrirlo en vivo. Tres valores se aceptan sin mapeo previo: `TPP`,
+  `SHIPPING`, `HANDLING`; un código no mapeado no es error, se cobra como `TPP` con un
+  warning `tax_code_unmapped`.
 - **La versión de Node del servidor de producción es desconocida.** `package.json` no
   tiene campo `engines` y la documentación sólo dice "14 o superior". Las decisiones de
   Jest y del UUID están tomadas para el piso más bajo de ese rango.
