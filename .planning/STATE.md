@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-04-PLAN.md
-last_updated: "2026-09-11T20:56:16.218Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-09-11T21:14:40.569Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 8
-  completed_plans: 5
-  percent: 63
+  completed_plans: 6
+  percent: 75
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 02 (confirmar-cancelar-y-devolver-la-respuesta-ntegra) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [██████░░░░] 63%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [██████░░░░] 63%
 | Phase 01 P03 | 9min | 2 tasks | 7 files |
 | Phase 01 P04 | 13min | 3 tasks | 13 files |
 | Phase 02 P01 | 15min | 3 tasks | 14 files |
+| Phase 02 P02 | 12min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,10 @@ Decisiones que afectan el trabajo actual:
 - [Phase Phase 02]: validateV2FileShape corre en el paso 2 de _executeV2, antes de resolver la entidad — Un archivo v1 bajo v2 aborta con la causa raíz y no con 'no se pudo resolver el código de entidad' (cierra IN-08); validateV2IntentFields conserva su guardia como defensa en profundidad
 - [Phase Phase 02]: La Task 2 no tiene commit feat: el paso directo ya es la implementación de SAFE-04 y COMP-03 — Lo que se commitea es la prueba con el FileManager real y la evidencia de mutación: parseFloat en el cliente v2 y en writeJsonFile ponen 4 casos en rojo cada una
 - [Phase Phase 02]: El caso de la Fase 1 'archivo v1 bajo la rama v2' se actualiza para afirmar el aborto temprano — Describía el orden viejo (guardia después de resolver la entidad); ahora afirma además que la entidad nunca se resolvió: más fuerte, no más débil
+- [Phase 02]: El cuerpo de cancelación v2 es una proyección explícita { invoice_id, customer_id } construida llave por llave, sin request_id, transaction_type ni committed — El endpoint sólo documenta esos dos campos y no dice qué hace con los extra; la excepción a SAFE-01 se acepta porque la cancelación es idempotente por naturaleza (repetir → 404/422 sin doble efecto; 409 documentado como seguro de reintentar)
+- [Phase 02]: _buildV2Body en el manejador y _resolveUrl en el cliente bifurcan por operación con throw terminal y sin rama else, con el molde de getIntentFor — Mandar una cancelación a la ruta de cálculo (o al revés) confundiría al proveedor con un cuerpo válido para otra cosa; la URL de cancelación sale sólo de SynexusConfig.getCancelUrl() (CONN-04)
+- [Phase 02]: Las aserciones de campo ausente afirman la lista literal 'falta(n): …' y no sólo que el mensaje contiene el nombre — Los dos nombres también aparecen en la parte fija del mensaje y la mutación 'sin comprobación de customer_id' dejaba pasar el caso 'sin los dos'; se reforzó antes del commit GREEN
+- [Phase 02]: La corrida de humo con el index.js real fue denegada por permisos del entorno y no se rodeó — La cobertura equivalente es v2CancelEndToEnd con el grafo real a mano; index.js está congelado y su cableado ya se probó de humo en 01-04 y 02-01
 
 ### Pending Todos
 
@@ -140,6 +145,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-11T20:56:03.841Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-09-11T21:14:40.566Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None

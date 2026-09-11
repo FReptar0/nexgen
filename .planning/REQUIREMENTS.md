@@ -19,7 +19,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 
 - [x] **OPER-01**: `get_tax` cotiza sin dejar rastro en el proveedor — no persiste factura ni snapshot
 - [x] **OPER-02**: `post_tax` registra una factura confirmada
-- [ ] **OPER-03**: `cancel_tax` cancela una transacción previamente confirmada contra el endpoint v2 correspondiente
+- [x] **OPER-03**: `cancel_tax` cancela una transacción previamente confirmada contra el endpoint v2 correspondiente
 - [x] **OPER-04**: La validación estricta que hoy protege `get_tax` y `post_tax` de invertirse sigue vigente bajo el contrato v2
 - [x] **OPER-05**: Una operación inválida o un campo de intención ausente aborta antes de emitir cualquier petición de red
 
@@ -113,7 +113,7 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CONN-05 | Phase 1 | Complete |
 | OPER-01 | Phase 1 | Complete |
 | OPER-02 | Phase 2 | Complete |
-| OPER-03 | Phase 2 | Pending |
+| OPER-03 | Phase 2 | Complete |
 | OPER-04 | Phase 1 | Complete |
 | OPER-05 | Phase 1 | Complete |
 | SAFE-01 | Phase 1 | Complete |
