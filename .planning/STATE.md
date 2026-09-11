@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Fase 1 cerrada — 01-VERIFICATION.md passed; pendientes fuera del código en STATE › Blockers
-last_updated: "2026-09-11T03:50:00.000Z"
-last_activity: 2026-09-11 -- Fase 1 completa y verificada (6/6 criterios, 242 pruebas); Fase 2 lista para planear
+status: executing
+stopped_at: Completed 01-04-PLAN.md
+last_updated: "2026-09-11T20:56:16.218Z"
+last_activity: 2026-09-11
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 33
+  total_plans: 8
+  completed_plans: 5
+  percent: 63
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** El monto de impuesto que nexgen escribe en el archivo de respuesta tiene que ser el correcto, y no debe alterar estado en la API del proveedor sin que se haya pedido explícitamente.
-**Current focus:** Phase 01 — camino-v2-de-punta-a-punta-para-una-cotizaci-n
+**Current focus:** Phase 02 — confirmar-cancelar-y-devolver-la-respuesta-ntegra
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Ready to plan
+Phase: 02 (confirmar-cancelar-y-devolver-la-respuesta-ntegra) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [███░░░░░░░] 33% (1/3 fases)
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [███░░░░░░░] 33% (1/3 fases)
 | Phase 01 P02 | 16min | 2 tasks | 8 files |
 | Phase 01 P03 | 9min | 2 tasks | 7 files |
 | Phase 01 P04 | 13min | 3 tasks | 13 files |
+| Phase 02 P01 | 15min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -88,6 +89,11 @@ Decisiones que afectan el trabajo actual:
 - [Phase Phase 01]: Los archivos de prueba de la wave 3 construyen el manejador con ocho argumentos y sus casos v2 pasan de 'rechaza en la guardia' a 'resuelve y llama al cliente' — Ninguna aserción se debilitó; la guardia de cableado conserva una prueba dedicada con null en cada archivo
 - [Phase Phase 01]: Se actualizaron los agentes de .claude/agents además de los comandos — CLAUDE.md exige revisarlos cuando cambia el código que referencian; el ayudante del validador pedía que toda regla nueva fuera alcanzable desde validate(), lo que rompería la rama v2
 - [Phase Phase 01]: La corrida de humo del CLI real se hace con un preload que bloquea http/https, como tests/setup.js — Prueba que index.js cablea el cliente y que la guardia se pasa sin que nada salga a la red ni exista .env
+- [Phase Phase 02]: El throw terminal de getIntentFor deja de decir 'todavía' y nombra a cancel_tax como fuera del mapeo — Conserva la frase 'mapeo de intención' que buscan las pruebas y no promete un mapeo que el plan 02-02 no dará: cancel_tax tendrá su propio constructor
+- [Phase Phase 02]: La guardia de archivo v1 se copia literal en validateV2FileShape en vez de compartirse — La duplicación de cuatro líneas es el precio de que git diff del validador sea sólo adiciones, la prueba mecánica de que nada congelado se movió
+- [Phase Phase 02]: validateV2FileShape corre en el paso 2 de _executeV2, antes de resolver la entidad — Un archivo v1 bajo v2 aborta con la causa raíz y no con 'no se pudo resolver el código de entidad' (cierra IN-08); validateV2IntentFields conserva su guardia como defensa en profundidad
+- [Phase Phase 02]: La Task 2 no tiene commit feat: el paso directo ya es la implementación de SAFE-04 y COMP-03 — Lo que se commitea es la prueba con el FileManager real y la evidencia de mutación: parseFloat en el cliente v2 y en writeJsonFile ponen 4 casos en rojo cada una
+- [Phase Phase 02]: El caso de la Fase 1 'archivo v1 bajo la rama v2' se actualiza para afirmar el aborto temprano — Describía el orden viejo (guardia después de resolver la entidad); ahora afirma además que la entidad nunca se resolvió: más fuerte, no más débil
 
 ### Pending Todos
 
@@ -134,6 +140,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-10T21:33:13.663Z
+Last session: 2026-09-11T20:56:03.841Z
 Stopped at: Completed 01-04-PLAN.md
 Resume file: None

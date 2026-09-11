@@ -78,7 +78,7 @@ Plans:
   6. El archivo de salida conserva el nombre del archivo de entrada, el prefijo `RESPONSE_`, la numeración original y el directorio de salida, con el cuerpo escrito completo y sin transformar; los errores del contrato v2 se distinguen por su código estable y no por el texto del mensaje; y el identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida
 **Plans**: 4 plans (02-01 … 02-04), en 4 waves secuenciales — comparten `synexusApiClient.js` y el manejador
 Plans:
-- [ ] 02-01-PLAN.md — `post_tax` bajo v2 (sales_invoice + committed true), fixture de contrato en `tests/fixtures/`, fidelidad numérica y contrato de archivos con el `FileManager` real, WR-03/WR-04
+- [x] 02-01-PLAN.md — `post_tax` bajo v2 (sales_invoice + committed true), fixture de contrato en `tests/fixtures/`, fidelidad numérica y contrato de archivos con el `FileManager` real, WR-03/WR-04
 - [ ] 02-02-PLAN.md — `cancel_tax` bajo v2: `POST /api/v1/invoices/cancel` con la proyección `{ invoice_id, customer_id }`, aborto antes de la red si falta uno, recorrido completo y contraste v1
 - [ ] 02-03-PLAN.md — `request_id` del proveedor registrado en toda corrida (SAFE-06) y clasificación de errores por código estable / por status en la cancelación (SAFE-05)
 - [ ] 02-04-PLAN.md — Un solo reintento en proceso con la misma llave, sólo cuando es seguro (SAFE-02), y documentación de comandos, agentes y README al día

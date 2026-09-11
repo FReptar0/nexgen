@@ -18,7 +18,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 ### Semántica de operaciones (OPER)
 
 - [x] **OPER-01**: `get_tax` cotiza sin dejar rastro en el proveedor — no persiste factura ni snapshot
-- [ ] **OPER-02**: `post_tax` registra una factura confirmada
+- [x] **OPER-02**: `post_tax` registra una factura confirmada
 - [ ] **OPER-03**: `cancel_tax` cancela una transacción previamente confirmada contra el endpoint v2 correspondiente
 - [x] **OPER-04**: La validación estricta que hoy protege `get_tax` y `post_tax` de invertirse sigue vigente bajo el contrato v2
 - [x] **OPER-05**: Una operación inválida o un campo de intención ausente aborta antes de emitir cualquier petición de red
@@ -28,7 +28,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 - [x] **SAFE-01**: Toda petición v2 lleva una llave de idempotencia única generada por nexgen
 - [ ] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
 - [x] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
-- [ ] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
+- [x] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
 - [ ] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
 - [ ] **SAFE-06**: El identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida, para poder levantar soporte
 
@@ -43,22 +43,22 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 ### Compatibilidad (COMP)
 
 - [x] **COMP-01**: El camino v1 conserva exactamente su comportamiento actual — mismo método, misma URL, misma autenticación, mismos mensajes
-- [ ] **COMP-02**: El contrato de archivos se conserva sin cambios: mismo nombre de entrada, prefijo `RESPONSE_`, numeración original, mismo directorio de salida
-- [ ] **COMP-03**: La respuesta v2 se escribe completa y sin transformar, tal como la devuelve el proveedor
+- [x] **COMP-02**: El contrato de archivos se conserva sin cambios: mismo nombre de entrada, prefijo `RESPONSE_`, numeración original, mismo directorio de salida
+- [x] **COMP-03**: La respuesta v2 se escribe completa y sin transformar, tal como la devuelve el proveedor
 - [x] **COMP-04**: La arquitectura en cinco capas se respeta — ninguna capa nueva alcanza a otra por fuera de la inyección de dependencias en el punto de entrada
 
 ### Pruebas (TEST)
 
 - [x] **TEST-01**: Existe un runner de pruebas ejecutable con un solo comando
-- [ ] **TEST-02**: Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que se construye, sin salir a la red
+- [x] **TEST-02**: Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que se construye, sin salir a la red
 - [x] **TEST-03**: Hay prueba que falla si `get_tax` llegara a construir una petición que persista factura
-- [ ] **TEST-04**: Hay prueba que falla si un monto de la respuesta pasa por conversión a punto flotante
+- [x] **TEST-04**: Hay prueba que falla si un monto de la respuesta pasa por conversión a punto flotante
 - [x] **TEST-05**: Hay prueba que verifica el rechazo por descuadre entre prefijo de llave y host
 - [x] **TEST-06**: La suite corre sin credenciales y sin acceso a la red
 
 ### Verificación (VERIF)
 
-- [ ] **VERIF-01**: La respuesta real de staging archivada en `data/` se usa como fixture de contrato, y hay prueba que falla si la forma de la respuesta esperada se desvía de ella
+- [x] **VERIF-01**: La respuesta real de staging archivada en `data/` se usa como fixture de contrato, y hay prueba que falla si la forma de la respuesta esperada se desvía de ella
 - [ ] **VERIF-02**: Existe un procedimiento escrito, ejecutable desde el servidor, para validar las tres operaciones contra staging
 - [ ] **VERIF-03**: Las tres operaciones quedan ejecutadas con éxito contra staging y sus respuestas archivadas
 - [ ] **VERIF-04**: Existe un procedimiento de corte a producción documentado como lista de verificación, que incluye la comprobación previa de correspondencia llave↔host, qué observar en la primera transacción real, y cómo revertir al camino v1 sin desplegar código
@@ -112,14 +112,14 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CONN-04 | Phase 1 | Complete |
 | CONN-05 | Phase 1 | Complete |
 | OPER-01 | Phase 1 | Complete |
-| OPER-02 | Phase 2 | Pending |
+| OPER-02 | Phase 2 | Complete |
 | OPER-03 | Phase 2 | Pending |
 | OPER-04 | Phase 1 | Complete |
 | OPER-05 | Phase 1 | Complete |
 | SAFE-01 | Phase 1 | Complete |
 | SAFE-02 | Phase 2 | Pending |
 | SAFE-03 | Phase 1 | Complete |
-| SAFE-04 | Phase 2 | Pending |
+| SAFE-04 | Phase 2 | Complete |
 | SAFE-05 | Phase 2 | Pending |
 | SAFE-06 | Phase 2 | Pending |
 | CFG-01 | Phase 1 | Complete |
@@ -128,16 +128,16 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | CFG-04 | Phase 1 | Complete |
 | CFG-05 | Phase 1 | Complete |
 | COMP-01 | Phase 1 | Complete |
-| COMP-02 | Phase 2 | Pending |
-| COMP-03 | Phase 2 | Pending |
+| COMP-02 | Phase 2 | Complete |
+| COMP-03 | Phase 2 | Complete |
 | COMP-04 | Phase 1 | Complete |
 | TEST-01 | Phase 1 | Complete |
-| TEST-02 | Phase 2 | Pending |
+| TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete |
-| TEST-04 | Phase 2 | Pending |
+| TEST-04 | Phase 2 | Complete |
 | TEST-05 | Phase 1 | Complete |
 | TEST-06 | Phase 1 | Complete |
-| VERIF-01 | Phase 2 | Pending |
+| VERIF-01 | Phase 2 | Complete |
 | VERIF-02 | Phase 3 | Pending |
 | VERIF-03 | Phase 3 | Pending |
 | VERIF-04 | Phase 3 | Pending |
