@@ -53,13 +53,22 @@ Work in this order, in **one pass**:
      or on `Committed`, i.e. a v1 file, *before* the entity is resolved)
      → `synexusConfig.resolveEntityCode` (`--entity` > `SYNEXUS_ENTITY` >
      `entity_id`) → `printProfile` (masked key) →
-     `requestBuilder.getIntentFor` → `validator.validateV2IntentFields`
-     (aborts on `Committed`, on a contradicting `transaction_type` /
-     `committed`, or on an inherited `request_id`) →
-     `requestBuilder.buildRequestBody` → wiring guard →
-     `synexusApiClient.makeRequest`. `validate()`,
-     `validateCommittedField` **and `sanitizeStringFields`** are **never**
-     called on this branch: the file's strings travel verbatim (WR-03). →
+     `_buildV2Body(operation, requestBody)`, which **branches by
+     operation with no default branch**:
+       - `get_tax` / `post_tax`: `requestBuilder.getIntentFor` →
+         `validator.validateV2IntentFields` (aborts on `Committed`, on a
+         contradicting `transaction_type` / `committed`, or on an
+         inherited `request_id`) → `requestBuilder.buildRequestBody`.
+       - `cancel_tax`: `requestBuilder.buildCancelBody` — a projection
+         `{ invoice_id, customer_id }` of the file, nothing else; aborts
+         before the network if either is missing. `getIntentFor` and
+         `validateV2IntentFields` are **not** called for cancellation.
+     → trace `Cuerpo v2 a enviar:` → wiring guard →
+     `synexusApiClient.makeRequest` (URL via `_resolveUrl(operation)`,
+     which asks `SynexusConfig` for the calculation or the cancel URL).
+     `validate()`, `validateCommittedField` **and `sanitizeStringFields`**
+     are **never** called on this branch: the file's strings travel
+     verbatim (WR-03). →
    - `_saveResponse` (which calls `getResponseFileName`,
      `ensureDirectory`, `writeJsonFile`) — same for both contracts.
 4. **Validation step**: state what would pass/fail for this payload.
@@ -67,16 +76,20 @@ Work in this order, in **one pass**:
    the file must **not** carry `Committed` and must be an object, not an
    array; the intent mapping is `get_tax` → `sales_estimate` +
    `committed: false` and `post_tax` → `sales_invoice` + `committed: true`
-   (same calculation endpoint, inverted intent). `cancel_tax` under v2 is
-   plan 02-02. Note the sanitization scope (only `'` → `\'`, **v1 only**;
-   v2 does not sanitize).
+   (same calculation endpoint, inverted intent). `cancel_tax` under v2
+   has no intent: the body is the projection `{ invoice_id, customer_id }`
+   and the file must carry both (non-empty). Note the sanitization scope
+   (only `'` → `\'`, **v1 only**; v2 does not sanitize).
 5. **API step**: under v1, compute the URL using `Config.getEndpointUrl`.
    Note `TEST_MODE` from `.env` if accessible, otherwise show both
    possibilities. The HTTP method is `GET` with body (unusual — call
-   this out). Under v2, the URL is `SynexusConfig.getCalculationUrl()`
-   (`<SYNEXUS_BASE_URL>/api/v1/tax_calculations`), the method is `POST`,
-   the key travels in `Authorization: Bearer` (never in the URL) and the
-   entity in `X-Synexus-Entity`.
+   this out). Under v2 the URL depends on the operation:
+   `SynexusConfig.getCalculationUrl()`
+   (`<SYNEXUS_BASE_URL>/api/v1/tax_calculations`) for `get_tax` /
+   `post_tax`, `SynexusConfig.getCancelUrl()`
+   (`<SYNEXUS_BASE_URL>/api/v1/invoices/cancel`) for `cancel_tax`; the
+   method is always `POST`, the key travels in `Authorization: Bearer`
+   (never in the URL) and the entity in `X-Synexus-Entity`.
 6. **Storage step**: state the output path
    (`<OUTPUT_DIR>/RESPONSE_<basename>.json`) and note that it
    overwrites prior responses.

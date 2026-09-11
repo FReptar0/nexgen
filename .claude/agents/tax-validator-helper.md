@@ -32,8 +32,13 @@ The class `TaxValidator` exposes:
   the file carries `Committed` (looks like a v1 file), if
   `transaction_type` / `committed` contradict the intent returned by
   `SynexusRequestBuilder.getIntentFor`, or if the file brings its own
-  `request_id`. It is called **only** by `_executeV2` in the CLI layer
-  and is **deliberately not part of `validate()`** — the v2 file has no
+  `request_id`. It is called **only** from the CLI layer
+  (`TaxCommandHandler._buildV2Body`, reached from `_executeV2`) and
+  **only for the calculation operations** (`get_tax`, `post_tax`):
+  `cancel_tax` has no intent and never goes through it (its body is the
+  projection built by `SynexusRequestBuilder.buildCancelBody`, which
+  does its own presence check of `invoice_id` / `customer_id`). It is
+  **deliberately not part of `validate()`** — the v2 file has no
   `Committed`, so the v1 aggregator would reject every real v2 file.
 - `validateV2FileShape(requestBody)` — sibling for the **v2** contract,
   called by `_executeV2` right after `validateRequestBody` and *before*

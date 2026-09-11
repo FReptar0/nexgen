@@ -11,11 +11,15 @@ Revert a previously committed tax transaction by hitting the
 
 > **Contract note.** This command runs the **v1** path by default. The
 > `--api-version=v2` flag (or `TAX_API_VERSION=v2`) selects the Synexus
-> Compute contract, but `cancel_tax` is **not wired under v2 yet** (plan
-> 02-02 of the migration gives it its own endpoint and body): with the
-> flag, the run aborts before any request with
-> `no tiene mapeo de intención en el contrato v2`. Do not add
-> the flag here; everything below describes v1.
+> Compute contract, where `cancel_tax` is a **different endpoint with a
+> different body** (plan 02-02): `POST <SYNEXUS_BASE_URL>/api/v1/invoices/cancel`
+> with **exactly** `{ invoice_id, customer_id }` projected from the file
+> — no `cart`, no `transaction_type`/`committed`, no `request_id`. If
+> either field is missing/empty the run aborts before any request with
+> `Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y
+> "customer_id"; falta(n): …`. A v1-shaped file (`Committed`) under v2
+> aborts with `parece del contrato v1`. Do not add the flag here unless
+> the user asks for v2; everything below describes v1.
 
 > **Note on TEST_MODE**: `cancel_tax` **does not respect `TEST_MODE`**.
 > The URL is always `<BASE_URL>CancelTransaction` regardless. If you
