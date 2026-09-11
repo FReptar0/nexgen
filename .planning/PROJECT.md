@@ -34,21 +34,31 @@ esto toca dinero y registros fiscales de un tercero.
 - ✓ Cliente HTTP único con timeout de 30s y clasificación de errores de red — `src/api/taxApiClient.js`
 - ✓ Integración v1 vigente: `STCCalcV3` / `STCCalcV3_TEST` / `CancelTransaction`, vía `GET` con cuerpo JSON y autenticación `?code=` en la URL
 
+<!-- Validado en Fase 1 (2026-09-11): verificado sin red contra el código; la confirmación en vivo es de la Fase 3. -->
+
+- ✓ Runner de pruebas con un comando, sin `.env`, sin credenciales, sin red — `npm test`, 242 casos — Fase 1
+- ✓ Camino v1 congelado por pruebas de cable y de mensajes; `taxApiClient.js` sin un solo cambio — Fase 1
+- ✓ Selector de contrato: v1 por omisión, v2 explícito vía `TAX_API_VERSION` o `--api-version=v2`; flag mal escrito aborta en vez de caer en v1 — Fase 1
+- ✓ `get_tax` v2 tipado `sales_estimate` + `committed: false` — no persiste factura — con guardia de regresión que niega `sales_invoice` — Fase 1
+- ✓ `POST /api/v1/tax_calculations` con `Authorization: Bearer` y `X-Synexus-Entity`; credencial nunca en la URL ni en stdout/logs — Fase 1
+- ✓ `request_id` UUID v4 en cada petición v2, desde `randomBytes` — Fase 1
+- ✓ Freno host ↔ prefijo de llave antes de la red; rechaza `http://`, rutas, query y credenciales embebidas — Fase 1
+- ✓ Código de entidad por precedencia flag > env > JSON, nunca hardcodeado; aborta en español si no se resuelve — Fase 1
+- ✓ Guardia "archivo parece del contrato v1" bajo selector v2 — Fase 1
+
 ### Active
 
 <!-- Alcance actual. Hipótesis hasta que se verifiquen contra staging. -->
 
-- [ ] Consumir Synexus Compute v2: `POST /api/v1/tax_calculations`, `Authorization: Bearer`, header de entidad
-- [ ] Mapear las tres operaciones al contrato v2 sin perder su semántica actual
-- [ ] `get_tax` debe cotizar **sin persistir** factura en el proveedor (`transaction_type: "sales_estimate"`)
-- [ ] `post_tax` debe confirmar (`transaction_type: "sales_invoice"` + `committed: true`)
-- [ ] `cancel_tax` debe apuntar a `POST /api/v1/invoices/cancel`
-- [ ] Enviar `request_id` (UUID) como llave de idempotencia en cada petición
-- [ ] Validar la correspondencia host ↔ prefijo de llave antes de emitir cualquier petición
-- [ ] Código de entidad parametrizable, nunca hardcodeado, con precedencia definida
-- [ ] Tratar montos y tasas como cadenas decimales de extremo a extremo (cero `parseFloat`)
-- [ ] Pruebas automatizadas del mapeo v1→v2 (sólo esa superficie)
-- [ ] Camino v1 intacto y funcionando durante toda la migración
+- [ ] `post_tax` debe confirmar (`transaction_type: "sales_invoice"` + `committed: true`) — Fase 2
+- [ ] `cancel_tax` debe apuntar a `POST /api/v1/invoices/cancel` — Fase 2
+- [ ] Tratar montos y tasas como cadenas decimales de extremo a extremo (cero `parseFloat`) — Fase 2
+- [ ] Respuesta v2 escrita completa y sin transformar, con `request_id` del proveedor registrado — Fase 2
+- [ ] Reintento tras timeout reutiliza la misma llave de idempotencia — Fase 2
+- [ ] Fixture de contrato desde la respuesta real de staging (hoy dentro de un PDF en `data/`) — Fase 2
+- [ ] Decidir el escape de apóstrofos en el cable v2 (WR-03) y la validación de forma del JSON raíz (WR-04) — Fase 2
+- [ ] Procedimiento de verificación contra staging y lista de corte a producción — Fase 3
+- [ ] Camino v1 intacto y funcionando durante toda la migración — continuo, verificado por la suite en cada fase
 
 ### Out of Scope
 
@@ -96,9 +106,12 @@ produce hoy la extracción de Sage** — eso sólo existe en los archivos reales
 El host de documentación de errores que la API devuelve en cada respuesta de error
 (`docs_url`) no resuelve en DNS.
 
-**Estado del repositorio.** Rama `feat/synexus-v2-migration` creada, sin commits de
-código todavía. Sin pruebas, sin CI, sin linter. Mapa del código en `.planning/codebase/`
-(7 documentos, ~1,300 líneas, generado 2026-09-10).
+**Estado del repositorio.** Rama `feat/synexus-v2-migration`. **Fase 1 completa
+(2026-09-11):** el camino v2 emite una cotización de punta a punta, verificada sin red;
+v1 congelado por pruebas. Jest 29.7.0 con 9 suites / 242 casos. Sin CI ni linter todavía.
+Mapa del código en `.planning/codebase/` generado 2026-09-10 — **desfasado**: no incluye
+`synexusConfig.js`, `synexusRequestBuilder.js`, `synexusApiClient.js` ni `tests/`;
+refrescar con `/gsd-map-codebase` antes de planear la Fase 2.
 
 ## Constraints
 
@@ -143,4 +156,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-10 — se registra la resolución de CFG-03 (v1 por omisión, v2 por interruptor de entorno)*
+*Last updated: 2026-09-11 after Phase 1 completion*
