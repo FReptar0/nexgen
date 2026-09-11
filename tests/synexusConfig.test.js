@@ -1,7 +1,8 @@
 // tests/synexusConfig.test.js
 // Frenos de arranque del contrato v2 (SAFE-03, CFG-04), resolución del código
-// de entidad por precedencia (CFG-01, CFG-02), composición de la URL de cálculo
-// desde configuración (CONN-04) y enmascaramiento de la llave (CFG-05).
+// de entidad por precedencia (CFG-01, CFG-02), composición de las URL de cálculo
+// y de cancelación desde configuración (CONN-04, OPER-03) y enmascaramiento de
+// la llave (CFG-05).
 //
 // src/config/synexusConfig.js exporta la CLASE, así que cada caso muta
 // process.env.SYNEXUS_* y construye una instancia nueva. Los valores originales
@@ -276,6 +277,57 @@ describe('SynexusConfig — getCalculationUrl (CONN-04)', () => {
         process.env.SYNEXUS_BASE_URL = stagingHost;
         const config = new SynexusConfig();
         expect(config.getCalculationUrl()).not.toContain('/calculate');
+    });
+});
+
+describe('SynexusConfig — getCancelUrl (OPER-03, CONN-04)', () => {
+    // Espejo del describe de getCalculationUrl: la URL de cancelación sale del
+    // mismo host de configuración, con otra ruta. Las dos conviven en la misma
+    // instancia; el cliente v2 pide una u otra según la operación.
+    beforeEach(() => {
+        process.env.SYNEXUS_API_KEY = testKey;
+    });
+
+    it('compone host de configuración + /api/v1/invoices/cancel', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost;
+        const config = new SynexusConfig();
+        expect(config.getCancelUrl()).toBe('https://compute.staging.synexustax.com/api/v1/invoices/cancel');
+    });
+
+    it('una barra final sobrante en la variable produce exactamente la misma cadena, sin barra doble', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost + '/';
+        const config = new SynexusConfig();
+        expect(config.getCancelUrl()).toBe('https://compute.staging.synexustax.com/api/v1/invoices/cancel');
+        expect(config.getCancelUrl()).not.toContain('//api');
+    });
+
+    it('el host sale de configuración: con el host de producción y la llave synexus_live_ cambia la URL resuelta', () => {
+        process.env.SYNEXUS_BASE_URL = productionHost;
+        process.env.SYNEXUS_API_KEY = liveKey;
+        const config = new SynexusConfig();
+        expect(config.getCancelUrl()).toBe('https://compute.synexustax.com/api/v1/invoices/cancel');
+    });
+
+    it('no es la ruta de cálculo ni lleva consulta: sin tax_calculations y sin "?"', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost;
+        const config = new SynexusConfig();
+        expect(config.getCancelUrl()).not.toContain('tax_calculations');
+        expect(config.getCancelUrl()).not.toContain('?');
+    });
+
+    it('cancelPath es una propiedad de instancia con valor /api/v1/invoices/cancel, como calculationPath', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost;
+        const config = new SynexusConfig();
+        expect(config.cancelPath).toBe('/api/v1/invoices/cancel');
+        expect(config.calculationPath).toBe('/api/v1/tax_calculations');
+    });
+
+    it('getCalculationUrl sigue devolviendo la ruta de cálculo: las dos rutas conviven en la misma instancia', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost;
+        const config = new SynexusConfig();
+        expect(config.getCalculationUrl()).toBe('https://compute.staging.synexustax.com/api/v1/tax_calculations');
+        expect(config.getCancelUrl()).toBe('https://compute.staging.synexustax.com/api/v1/invoices/cancel');
+        expect(config.getCancelUrl()).not.toBe(config.getCalculationUrl());
     });
 });
 

@@ -1,5 +1,5 @@
 // tests/synexusRequestBuilder.test.js
-// El cuerpo de las dos operaciones de cálculo v2 tal como lo arma nexgen, sin red:
+// El cuerpo de las tres operaciones v2 tal como lo arma nexgen, sin red:
 //   1. TEST-03 — la guardia de regresión de OPER-01 (los cuatro primeros casos):
 //      la cotización no persiste nada.
 //   2. TEST-02 — la guardia espejo para post_tax (OPER-02): la confirmación
@@ -10,6 +10,10 @@
 //      todo lo demás cae en el throw terminal (OPER-05). cancel_tax NO pasa
 //      por este mapeo: su cuerpo es una proyección con constructor propio.
 //   5. Un cuerpo con un campo de intención ausente nunca sale del builder.
+//   6. buildCancelBody (OPER-03): la cancelación es una PROYECCIÓN de dos
+//      campos del archivo —invoice_id y customer_id— sin intención, sin llave
+//      de idempotencia (excepción documentada de SAFE-01) y sin arrastrar
+//      ningún otro campo; y aborta antes de la red si falta uno de los dos.
 //
 // Ningún caso afirma nada sobre montos: los montos son de la Fase 2, y un
 // impuesto de 0.00 no es un fallo (la entidad de sandbox no tiene nexo).
@@ -282,6 +286,166 @@ describe('getIntentFor — única fuente de verdad del mapeo operación → inte
 
         expect(() => builder.buildRequestBody('cancel_tax', input)).toThrow('cancel_tax');
         expect(input.request_id).toBeUndefined();
+    });
+});
+
+describe('buildCancelBody — la cancelación es una proyección de dos campos (OPER-03)', () => {
+    // El archivo del ERP tiene forma de cálculo (cart, direcciones, entidad);
+    // el endpoint de cancelación documenta exactamente dos campos y no dice qué
+    // hace con los extra. Proyectar es lo único que respeta el contrato tal
+    // como está escrito. Estos casos fallan si alguien "simplifica" la
+    // proyección a un paso directo del archivo.
+    const cancelMessagePrefix = 'Para cancelar bajo el contrato v2';
+
+    // Archivo v2 completo, con entity_id además: la entidad se resuelve de él,
+    // pero NO viaja en el cuerpo de cancelación.
+    const createCancelFile = () => Object.assign(createV2Body(), { entity_id: 'CA-01' });
+
+    it('con un archivo v2 completo el resultado tiene exactamente las llaves customer_id e invoice_id', () => {
+        const body = builder.buildCancelBody(createCancelFile());
+
+        expect(Object.keys(body).sort()).toEqual(['customer_id', 'invoice_id']);
+    });
+
+    it('los valores son los del archivo: nexgen no traduce esquemas, los dos nombres son los del contrato v2', () => {
+        const body = builder.buildCancelBody(createCancelFile());
+
+        expect(body.invoice_id).toBe('DEMO-001');
+        expect(body.customer_id).toBe('CUST-1');
+        expect(body).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+    });
+
+    it('devuelve un objeto NUEVO y no muta el archivo', () => {
+        const input = createCancelFile();
+        const snapshot = JSON.parse(JSON.stringify(input));
+
+        const body = builder.buildCancelBody(input);
+        body.invoice_id = 'MUTADO';
+
+        expect(body).not.toBe(input);
+        expect(input).toEqual(snapshot);
+    });
+
+    it('cart, to_state, to_zip y entity_id NO se propagan al cuerpo de cancelación', () => {
+        const body = builder.buildCancelBody(createCancelFile());
+
+        expect(body).not.toHaveProperty('cart');
+        expect(body).not.toHaveProperty('to_state');
+        expect(body).not.toHaveProperty('to_zip');
+        expect(body).not.toHaveProperty('entity_id');
+    });
+
+    it('un archivo que además trae transaction_type y committed tampoco los propaga', () => {
+        const input = Object.assign(createCancelFile(), { transaction_type: 'sales_invoice', committed: true });
+
+        const body = builder.buildCancelBody(input);
+
+        expect(body).not.toHaveProperty('transaction_type');
+        expect(body).not.toHaveProperty('committed');
+        expect(Object.keys(body).sort()).toEqual(['customer_id', 'invoice_id']);
+    });
+
+    it('NO lleva request_id, transaction_type ni committed: la cancelación es la excepción documentada de SAFE-01 (idempotente por naturaleza; ninguno de los tres está documentado para este endpoint)', () => {
+        const body = builder.buildCancelBody(createCancelFile());
+
+        expect(body).not.toHaveProperty('request_id');
+        expect(body).not.toHaveProperty('transaction_type');
+        expect(body).not.toHaveProperty('committed');
+    });
+
+    it('no consulta getIntentFor ni genera llave: la cancelación no tiene intención que mapear', () => {
+        const intentSpy = jest.spyOn(builder, 'getIntentFor');
+        const keySpy = jest.spyOn(builder, '_generateRequestId');
+
+        builder.buildCancelBody(createCancelFile());
+
+        expect(intentSpy).not.toHaveBeenCalled();
+        expect(keySpy).not.toHaveBeenCalled();
+    });
+
+    it('sin invoice_id lanza con un mensaje que empieza por "Para cancelar bajo el contrato v2" y nombra invoice_id', () => {
+        const input = createCancelFile();
+        delete input.invoice_id;
+
+        let caught = null;
+        try {
+            builder.buildCancelBody(input);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith(cancelMessagePrefix)).toBe(true);
+        expect(caught.message).toContain('invoice_id');
+    });
+
+    it('sin customer_id lanza nombrando customer_id', () => {
+        const input = createCancelFile();
+        delete input.customer_id;
+
+        expect(() => builder.buildCancelBody(input)).toThrow(cancelMessagePrefix);
+        expect(() => builder.buildCancelBody(input)).toThrow('customer_id');
+    });
+
+    it('sin los dos, el mensaje nombra los dos', () => {
+        const input = createCancelFile();
+        delete input.invoice_id;
+        delete input.customer_id;
+
+        let caught = null;
+        try {
+            builder.buildCancelBody(input);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message).toContain('invoice_id');
+        expect(caught.message).toContain('customer_id');
+    });
+
+    it('invoice_id vacío ("") cuenta como ausente', () => {
+        const input = Object.assign(createCancelFile(), { invoice_id: '' });
+
+        expect(() => builder.buildCancelBody(input)).toThrow('invoice_id');
+    });
+
+    it('invoice_id null cuenta como ausente', () => {
+        const input = Object.assign(createCancelFile(), { invoice_id: null });
+
+        expect(() => builder.buildCancelBody(input)).toThrow('invoice_id');
+    });
+
+    it('al abortar usa el trío del repositorio: console.error una vez, logger.error una vez, throw', () => {
+        const input = createCancelFile();
+        delete input.customer_id;
+
+        expect(() => builder.buildCancelBody(input)).toThrow();
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        expect(logger.error.mock.calls[0][0]).toContain('customer_id');
+    });
+
+    it('el mensaje dice que aborta antes de emitir petición alguna', () => {
+        const input = createCancelFile();
+        delete input.invoice_id;
+
+        expect(() => builder.buildCancelBody(input)).toThrow(/antes de emitir/);
+    });
+
+    it('emite una traza por console.log que empieza por "Cuerpo v2 de cancelación construido"', () => {
+        builder.buildCancelBody(createCancelFile());
+
+        const trace = consoleLogSpy.mock.calls
+            .find(call => typeof call[0] === 'string' && call[0].startsWith('Cuerpo v2 de cancelación construido'));
+        expect(trace).toBeDefined();
+        expect(trace[0]).toContain('DEMO-001');
+        expect(trace[0]).toContain('CUST-1');
+    });
+
+    it('getIntentFor(cancel_tax) sigue lanzando y mencionando el mapeo de intención: la proyección no le dio mapeo', () => {
+        expect(() => builder.getIntentFor('cancel_tax')).toThrow('cancel_tax');
+        expect(() => builder.getIntentFor('cancel_tax')).toThrow(/mapeo de intenci[oó]n/);
     });
 });
 
