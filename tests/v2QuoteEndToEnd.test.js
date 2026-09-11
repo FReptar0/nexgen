@@ -4,8 +4,8 @@
 // dependencias armado A MANO igual que lo arma index.js (que no puede
 // requerirse: ejecuta main() al cargarse). Cubre las dos operaciones de
 // cálculo bajo v2 —la cotización (get_tax) y la confirmación (post_tax), que
-// van al mismo endpoint con la intención invertida— y el camino v1 de
-// contraste. El nombre del archivo se conserva aunque ya no sea sólo de la
+// van al mismo endpoint con la intención invertida—, el reintento único que
+// reutiliza la llave de idempotencia (SAFE-02) y el camino v1 de contraste. El nombre del archivo se conserva aunque ya no sea sólo de la
 // cotización: los SUMMARY, el review y el mapa del código lo citan.
 //
 // Sólo axios está sustituido. Todo lo demás es real: el Config singleton (las
@@ -136,7 +136,9 @@ const buildGraph = (args, requestBody) => {
     let synexusApiClient = null;
     if (apiVersion === 'v2') {
         synexusConfig = new SynexusConfig();
-        synexusApiClient = new SynexusApiClient(synexusConfig, logger);
+        // index.js no pasa opciones y hereda la espera real de 1000 ms entre
+        // intentos; la opción sólo quita el sueño de la suite (SAFE-02).
+        synexusApiClient = new SynexusApiClient(synexusConfig, logger, { wait: async () => {} });
     }
 
     const handler = new TaxCommandHandler(
@@ -723,5 +725,76 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
         const loggedLines = graph.logger.error.mock.calls.map(call => String(call[0]));
         expect(loggedLines.some(line => line.includes('generado por nexgen') && line.includes(sentRequestId))).toBe(true);
         expect(capturedConsoleOutput().some(line => line.includes(`Identificador para soporte: request_id=${sentRequestId} (generado por nexgen`))).toBe(true);
+    });
+});
+
+describe('SAFE-02 de punta a punta — el reintento reutiliza la llave', () => {
+    // Con el grafo real: el cuerpo lo construye SynexusRequestBuilder una sola
+    // vez (con su request_id) y el cliente lo reenvía tal cual. Si alguien
+    // reconstruyera el cuerpo entre intentos, la confirmación podría registrar
+    // la factura dos veces; por eso la identidad se afirma aquí con toBe.
+    const postArgs = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
+
+    it('post_tax con timeout y luego 200: dos llamadas con el MISMO cuerpo (mismo request_id), archivo escrito una vez con el 200, la línea Reintentando (1/1) y la de éxito en consola, y la llave en ninguna parte', async () => {
+        const timeoutError = new Error('timeout of 30000ms exceeded');
+        timeoutError.code = 'ECONNABORTED';
+        timeoutError.request = {};
+        timeoutError.config = { url: v2CalculationUrl, headers: { Authorization: `Bearer ${v2ApiKey}` } };
+        const providerResponse = createConfirmedProviderResponse();
+        axios.mockRejectedValueOnce(timeoutError).mockResolvedValueOnce(fakes.createAxiosResponse(200, providerResponse));
+        const graph = buildGraph(postArgs, createV2Body());
+
+        await graph.handler.execute(postArgs);
+
+        expect(axios).toHaveBeenCalledTimes(2);
+        const firstCall = axios.mock.calls[0][0];
+        const secondCall = axios.mock.calls[1][0];
+        expect(firstCall.data).toBe(secondCall.data);
+        expect(firstCall.data.request_id).toBe(secondCall.data.request_id);
+        expect(secondCall.data.request_id).toMatch(uuidV4Pattern);
+        expect(secondCall.data.transaction_type).toBe('sales_invoice');
+        expect(secondCall.data.committed).toBe(true);
+        expect(secondCall.url).toBe(v2CalculationUrl);
+        expect(secondCall.headers).toEqual(firstCall.headers);
+        expect(graph.fileManager.writeJsonFile).toHaveBeenCalledTimes(1);
+        expect(graph.fileManager.writeJsonFile.mock.calls[0][1]).toBe(providerResponse);
+        const output = capturedConsoleOutput();
+        const retryLine = output.find(line => line.startsWith('Reintentando (1/1)'));
+        expect(retryLine).toBeDefined();
+        expect(retryLine).toContain(`request_id=${secondCall.data.request_id}`);
+        expect(retryLine).toContain('timeout (ECONNABORTED)');
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - Status: 200 - request_id=e2e-rid-0001');
+        expect(consoleLogSpy).toHaveBeenCalledWith('Operación post_tax completada exitosamente');
+        // El intento reintentado no dejó diagnóstico ni entrada en el log
+        expect(graph.logger.error).not.toHaveBeenCalled();
+        output.forEach(line => {
+            expect(line).not.toContain(v2ApiKey);
+            expect(line).not.toContain('Authorization');
+        });
+    });
+
+    it('post_tax con 409 idempotency_key_conflict: axios una sola vez, rechaza con el código, no escribe archivo', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(409, {
+            error: 'conflict',
+            code: 'idempotency_key_conflict',
+            message: 'request_id already used with a different payload',
+            request_id: 'rid-409-e2e'
+        }));
+        const graph = buildGraph(postArgs, createV2Body());
+
+        let caught = null;
+        try {
+            await graph.handler.execute(postArgs);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('Error HTTP 409 (idempotency_key_conflict): ')).toBe(true);
+        expect(caught.message).toContain('No se reintenta');
+        expect(caught.message).toContain('request_id=rid-409-e2e');
+        expect(axios).toHaveBeenCalledTimes(1);
+        expect(capturedConsoleOutput().some(line => line.startsWith('Reintentando'))).toBe(false);
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 });

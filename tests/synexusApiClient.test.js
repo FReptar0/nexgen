@@ -4,9 +4,16 @@
 // cancel_tax, sin rama por omisión), headers, el identificador de petición
 // del proveedor en toda corrida (SAFE-06), la clasificación de errores por
 // código estable —cálculo— y por status —cancelación—, nunca por el texto
-// (SAFE-05), y —sobre todo— que la llave portadora no se filtre por ninguna
-// vía de consola, ni en el camino feliz ni en el de error (CONN-01, CONN-02,
-// CONN-03, CONN-04, CFG-05, OPER-03).
+// (SAFE-05), el reintento ÚNICO en proceso con el mismo cuerpo y la misma
+// llave de idempotencia, sólo cuando es seguro (SAFE-02), y —sobre todo— que
+// la llave portadora no se filtre por ninguna vía de consola, ni en el camino
+// feliz ni en el de error (CONN-01, CONN-02, CONN-03, CONN-04, CFG-05, OPER-03).
+//
+// NINGUNA prueba de este archivo duerme: el cliente se construye SIEMPRE con
+// createClient, que inyecta una espera espiada (options.wait) en lugar del
+// setTimeout real de 1000 ms que index.js hereda. La única construcción
+// directa fuera del ayudante es la que comprueba esa espera por omisión, y no
+// emite ninguna petición.
 //
 // src/api/taxApiClient.js es el molde del que se copió este cliente y está
 // CONGELADO: aquí no se prueba nada de v1 (eso es tests/v1Freeze.wire.test.js).
@@ -55,6 +62,23 @@ const createSynexusConfigDouble = () => ({
     getCancelUrl: jest.fn(() => cancelUrl),
     getApiKey: jest.fn(() => apiKey)
 });
+
+/**
+ * Construye el cliente con la configuración doble y la espera entre intentos
+ * ESPIADA y sin dormir. Todo caso que provoque un reintento (timeout, 5xx
+ * transitorio, 409 seguro) pasaría por el setTimeout real de 1000 ms si se
+ * construyera a mano; por eso este es el único punto de construcción. La
+ * configuración doble queda accesible como client.synexusConfig para los
+ * casos que cuentan sus llamadas.
+ * @param {Object} [logger] - Doble del logger (por omisión, uno nuevo)
+ * @param {Object} [options] - Opciones del constructor; wait se sustituye por un jest.fn salvo que venga aquí
+ * @returns {SynexusApiClient}
+ */
+const createClient = (logger, options) => new SynexusApiClient(
+    createSynexusConfigDouble(),
+    logger || fakes.createFakeLogger(),
+    Object.assign({ wait: jest.fn(async () => {}) }, options || {})
+);
 
 /**
  * Error con la forma que axios entrega en Node: lleva la petición completa en
@@ -137,9 +161,9 @@ describe('SynexusApiClient — la llamada a axios (CONN-01, CONN-02, CONN-03)', 
     beforeEach(async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
         requestBody = createRequestBody();
-        synexusConfig = createSynexusConfigDouble();
 
-        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+        const client = createClient();
+        synexusConfig = client.synexusConfig;
         await client.makeRequest('get_tax', requestBody, entityCode);
         axiosCallArgument = axios.mock.calls[0][0];
     });
@@ -214,7 +238,7 @@ describe('SynexusApiClient — la llamada a axios (CONN-01, CONN-02, CONN-03)', 
     });
 
     it('el nombre del header de entidad es una propiedad de instancia, sustituible desde una prueba', () => {
-        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+        const client = createClient();
         expect(client.entityHeaderName).toBe('X-Synexus-Entity');
     });
 });
@@ -226,8 +250,8 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
     // con un cuerpo válido para otra cosa; por eso no hay rama por omisión.
     it('cancel_tax llama a axios con la URL de cancelación: getCancelUrl una vez y getCalculationUrl ninguna', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
-        const synexusConfig = createSynexusConfigDouble();
-        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+        const client = createClient();
+        const synexusConfig = client.synexusConfig;
 
         await client.makeRequest('cancel_tax', createCancelBody(), entityCode);
 
@@ -239,8 +263,8 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
 
     it('get_tax va a la URL de cálculo y no consulta getCancelUrl', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const synexusConfig = createSynexusConfigDouble();
-        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+        const client = createClient();
+        const synexusConfig = client.synexusConfig;
 
         await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -251,8 +275,8 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
 
     it('post_tax va a la MISMA URL de cálculo que get_tax y no consulta getCancelUrl', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const synexusConfig = createSynexusConfigDouble();
-        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+        const client = createClient();
+        const synexusConfig = client.synexusConfig;
 
         await client.makeRequest('post_tax', createRequestBody(), entityCode);
 
@@ -263,8 +287,8 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
 
     it('una operación desconocida lanza en español nombrándola ANTES de llamar a axios, con el trío', async () => {
         const logger = fakes.createFakeLogger();
-        const synexusConfig = createSynexusConfigDouble();
-        const client = new SynexusApiClient(synexusConfig, logger);
+        const client = createClient(logger);
+        const synexusConfig = client.synexusConfig;
 
         let caught = null;
         try {
@@ -293,7 +317,7 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
         beforeEach(async () => {
             axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
             cancelBody = createCancelBody();
-            const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+            const client = createClient();
             await client.makeRequest('cancel_tax', cancelBody, entityCode);
             axiosCallArgument = axios.mock.calls[0][0];
         });
@@ -328,7 +352,7 @@ describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
 describe('SynexusApiClient — trazas de la petición', () => {
     it('imprime la traza de la petición con el formato de v1: la URL, que en v2 no lleva credencial', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -337,7 +361,7 @@ describe('SynexusApiClient — trazas de la petición', () => {
 
     it('NO imprime el cuerpo: la rama v2 del CLI ya lo imprimió y duplicarlo ensucia la salida', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -348,7 +372,7 @@ describe('SynexusApiClient — trazas de la petición', () => {
 
     it('nunca imprime el objeto headers ni el nombre del header de entidad', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -363,7 +387,7 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
     it('con 200 devuelve response.data tal cual, sin transformarlo', async () => {
         const providerBody = { id: 'txn_1', total_tax: '0.00', lines: [{ item_id: 'SKU-1', tax: '0.00' }] };
         axios.mockResolvedValue(fakes.createAxiosResponse(200, providerBody));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         const result = await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -378,7 +402,7 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
     it('con 400 lanza con un mensaje que empieza por "Error HTTP 400: " y registra en el logger', async () => {
         const logger = fakes.createFakeLogger();
         axios.mockResolvedValue(fakes.createAxiosResponse(400, { error: 'tax_code_missing' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger);
+        const client = createClient(logger);
 
         let caught = null;
         try {
@@ -404,7 +428,7 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
 
     it('con 422 (dentro del corte de validateStatus) también lanza con el prefijo Error HTTP', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(422, { error: 'tax_code_missing', detail: 'cart[0]' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode))
             .rejects.toThrow('Error HTTP 422: ');
@@ -420,7 +444,7 @@ describe('SynexusApiClient — errores de transporte (_handleError)', () => {
      */
     const runWithRejection = async (error, logger) => {
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        const client = createClient(logger);
 
         let caught = null;
         try {
@@ -476,6 +500,10 @@ describe('SynexusApiClient — errores de transporte (_handleError)', () => {
         outputWithoutV2Variable().forEach(line => {
             expect(line).not.toContain('BASE_URL');
         });
+        // axios rechaza SIEMPRE en este caso: el timeout es reintentable
+        // (SAFE-02), así que hay exactamente dos llamadas y el diagnóstico es
+        // el del segundo intento.
+        expect(axios).toHaveBeenCalledTimes(2);
     });
 
     it('ENOTFOUND: diagnóstico en español que cita SYNEXUS_BASE_URL y nunca BASE_URL', async () => {
@@ -502,6 +530,8 @@ describe('SynexusApiClient — errores de transporte (_handleError)', () => {
             'Mensaje del servidor:',
             JSON.stringify({ error: 'upstream_unavailable' }, null, 2)
         );
+        // El 503 es reintentable (SAFE-02) y axios rechaza siempre: dos llamadas.
+        expect(axios).toHaveBeenCalledTimes(2);
     });
 
     it('sin respuesta (error.request presente, sin código conocido): diagnóstico de conectividad', async () => {
@@ -534,7 +564,7 @@ describe('SynexusApiClient — errores de transporte (_handleError)', () => {
 describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => {
     it('en una respuesta exitosa', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -543,7 +573,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
 
     it('en una respuesta 400', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(400, { error: 'bad_request' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toThrow();
 
@@ -554,7 +584,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
         const error = createAxiosError({ code: 'ECONNREFUSED', request: {} });
         expect(error.config.headers.Authorization).toContain(apiKey);
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toBe(error);
 
@@ -566,7 +596,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
             response: { status: 500, statusText: 'Internal Server Error', data: { error: 'boom' } }
         });
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toBe(error);
 
@@ -576,7 +606,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
     it('en un error genérico sin código ni respuesta, con config.headers.Authorization poblado', async () => {
         const error = createAxiosError({ message: 'fallo genérico' });
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toBe(error);
 
@@ -587,7 +617,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
         const logger = fakes.createFakeLogger();
         const error = createAxiosError({ code: 'ECONNREFUSED', request: {} });
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger);
+        const client = createClient(logger);
 
         await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toBe(error);
 
@@ -623,7 +653,7 @@ describe('SynexusApiClient — SAFE-06: el identificador de petición del provee
      */
     const runResolved = async (operation, response, logger, body) => {
         axios.mockResolvedValue(response);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        const client = createClient(logger);
         try {
             await client.makeRequest(operation, body || createRequestBody(), entityCode);
             return null;
@@ -642,7 +672,7 @@ describe('SynexusApiClient — SAFE-06: el identificador de petición del provee
      */
     const runRejected = async (operation, error, logger, body) => {
         axios.mockRejectedValue(error);
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        const client = createClient(logger);
         try {
             await client.makeRequest(operation, body || createRequestBody(), entityCode);
             return null;
@@ -759,7 +789,7 @@ describe('SynexusApiClient — SAFE-06: el identificador de petición del provee
         it('leer el identificador no transforma la respuesta: el resultado sigue siendo response.data por identidad, con su meta', async () => {
             const providerBody = { total_tax: '0.00', meta: { request_id: 'rid-body' } };
             axios.mockResolvedValue(fakes.createAxiosResponse(200, providerBody, { 'x-request-id': 'rid-header' }));
-            const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+            const client = createClient();
 
             const result = await client.makeRequest('get_tax', createRequestBody(), entityCode);
 
@@ -1032,7 +1062,7 @@ describe('SynexusApiClient — SAFE-05: los errores del cálculo se clasifican p
      */
     const runCalculationError = async (status, data, headers, logger, operation) => {
         axios.mockResolvedValue(fakes.createAxiosResponse(status, data, headers));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        const client = createClient(logger);
         try {
             await client.makeRequest(operation || 'get_tax', createRequestBody(), entityCode);
             return null;
@@ -1235,7 +1265,7 @@ describe('SynexusApiClient — SAFE-05: los errores de cancelación se clasifica
      */
     const runCancelError = async (status, data, headers, logger) => {
         axios.mockResolvedValue(fakes.createAxiosResponse(status, data, headers));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        const client = createClient(logger);
         try {
             await client.makeRequest('cancel_tax', createCancelBody(), entityCode);
             return null;
@@ -1328,10 +1358,374 @@ describe('SynexusApiClient — SAFE-05: los errores de cancelación se clasifica
     });
 });
 
+describe('SynexusApiClient — SAFE-02: un solo reintento en proceso, con el mismo cuerpo y la misma llave', () => {
+    // Sin reintento en nexgen, el "reintento" sería un humano volviendo a
+    // correr el CLI: proceso nuevo, request_id nuevo, y un post_tax podría
+    // registrar la factura dos veces. Por eso el reintento vive aquí: UNA sola
+    // vez, con el MISMO objeto de cuerpo ya construido (misma llave), y sólo
+    // ante lo que es seguro repetir: timeout, 502/503/504, el 409
+    // invoice_stale_object del cálculo (concurrencia) y el 409 de la
+    // cancelación (el contrato lo marca como seguro). Nunca ante un rechazo
+    // semántico: 401, 4xx de validación, 429, 500, red caída, ni el 409
+    // idempotency_key_conflict (misma llave, cuerpo distinto: ojos humanos).
+    // La espera se inyecta: se afirma que se PIDIÓ 1000 ms, nunca se duerme.
+    const ownRequestId = '11111111-1111-4111-8111-111111111111';
+    const okResponse = () => fakes.createAxiosResponse(200, { total_tax: '0.00' });
+    const cancelOkResponse = () => fakes.createAxiosResponse(200, { message: 'Invoice cancelled' });
+
+    /**
+     * Las líneas de stdout que anuncian un reintento.
+     * @returns {string[]}
+     */
+    const retryLines = () => consoleLogSpy.mock.calls
+        .map(call => call[0])
+        .filter(line => typeof line === 'string' && line.startsWith('Reintentando'));
+
+    /**
+     * Ejecuta makeRequest y devuelve { result, caught }: uno de los dos es null.
+     * @param {SynexusApiClient} client - Cliente ya construido
+     * @param {string} operation - Operación
+     * @param {Object} body - Cuerpo a enviar
+     * @returns {Promise<{ result: *, caught: Error|null }>}
+     */
+    const run = async (client, operation, body) => {
+        try {
+            const result = await client.makeRequest(operation, body, entityCode);
+            return { result: result, caught: null };
+        } catch (error) {
+            return { result: null, caught: error };
+        }
+    };
+
+    describe('las constantes y la espera inyectable', () => {
+        it('maxRetries es 1 y retryDelayMs es 1000: un solo reintento, no una política configurable', () => {
+            const client = createClient();
+
+            expect(client.maxRetries).toBe(1);
+            expect(client.retryDelayMs).toBe(1000);
+        });
+
+        it('construir sin options no lanza y deja una espera real por omisión (la que hereda index.js), que es una función que devuelve una promesa', async () => {
+            // Única construcción directa del archivo: no emite ninguna petición,
+            // así que no puede dormir. Se invoca con 0 ms sólo para comprobar
+            // que devuelve una promesa que resuelve.
+            const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+
+            expect(typeof client.wait).toBe('function');
+            await expect(client.wait(0)).resolves.toBeUndefined();
+        });
+
+        it('construir con { wait } usa exactamente esa función', () => {
+            const wait = jest.fn(async () => {});
+
+            const client = createClient(undefined, { wait: wait });
+
+            expect(client.wait).toBe(wait);
+        });
+    });
+
+    describe('lo que SÍ se reintenta, una sola vez y con el mismo cuerpo', () => {
+        it('timeout (ECONNABORTED) y luego 200: dos llamadas con el MISMO objeto data (misma llave), espera de 1000 ms pedida una vez, anuncio en stdout, y resuelve con el 200 sin diagnóstico ni log del primer intento', async () => {
+            const logger = fakes.createFakeLogger();
+            const wait = jest.fn(async () => {});
+            const firstError = createAxiosError({ code: 'ECONNABORTED', request: {} });
+            expect(firstError.config.headers.Authorization).toContain(apiKey);
+            axios.mockRejectedValueOnce(firstError).mockResolvedValueOnce(okResponse());
+            const client = createClient(logger, { wait: wait });
+            const requestBody = createRequestBody();
+
+            const result = await client.makeRequest('get_tax', requestBody, entityCode);
+
+            expect(result).toEqual({ total_tax: '0.00' });
+            expect(axios).toHaveBeenCalledTimes(2);
+            // Identidad: el segundo intento manda el MISMO objeto, no una copia
+            // ni un cuerpo reconstruido; por tanto la misma llave.
+            expect(axios.mock.calls[0][0].data).toBe(axios.mock.calls[1][0].data);
+            expect(axios.mock.calls[1][0].data).toBe(requestBody);
+            expect(axios.mock.calls[0][0].data.request_id).toBe(axios.mock.calls[1][0].data.request_id);
+            expect(axios.mock.calls[1][0].data.request_id).toBe(ownRequestId);
+            // Mismos headers (exactamente tres), misma URL, mismo método
+            expect(axios.mock.calls[1][0].headers).toEqual(axios.mock.calls[0][0].headers);
+            expect(Object.keys(axios.mock.calls[1][0].headers)).toHaveLength(3);
+            expect(axios.mock.calls[1][0].url).toBe(calculationUrl);
+            expect(axios.mock.calls[1][0].method).toBe('POST');
+            // La URL se resolvió una sola vez por makeRequest
+            expect(client.synexusConfig.getCalculationUrl).toHaveBeenCalledTimes(1);
+            // La espera se pidió, no se durmió
+            expect(wait).toHaveBeenCalledTimes(1);
+            expect(wait).toHaveBeenCalledWith(1000);
+            // El anuncio, con la llave y la razón
+            const lines = retryLines();
+            expect(lines).toHaveLength(1);
+            expect(lines[0].startsWith(`Reintentando (1/1) con la misma llave de idempotencia (request_id=${ownRequestId})`)).toBe(true);
+            expect(lines[0]).toContain('timeout (ECONNABORTED)');
+            // El intento reintentado NO pasa por _handleError: ni diagnóstico ni log
+            expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+                'Error en la petición: Timeout de conexión. La petición tardó más de 30 segundos.'
+            );
+            expect(logger.error).not.toHaveBeenCalled();
+            // La traza inicial se imprime una sola vez, antes del primer intento
+            const requestTraces = consoleLogSpy.mock.calls
+                .filter(call => typeof call[0] === 'string' && call[0].startsWith('Realizando petición'));
+            expect(requestTraces).toHaveLength(1);
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=no informado por el proveedor');
+            // El primer error traía config.headers.Authorization poblado: nada salió
+            expectNoCredentialLeak();
+        });
+
+        it('en el reintento, ninguna línea de consola contiene Authorization, Bearer ni la llave', async () => {
+            const firstError = createAxiosError({ code: 'ECONNABORTED', request: {} });
+            axios.mockRejectedValueOnce(firstError).mockResolvedValueOnce(okResponse());
+            const client = createClient();
+
+            await client.makeRequest('post_tax', createRequestBody(), entityCode);
+
+            expect(axios).toHaveBeenCalledTimes(2);
+            const output = capturedConsoleOutput();
+            expect(output.some(line => line.startsWith('Reintentando (1/1)'))).toBe(true);
+            output.forEach(line => {
+                expect(line).not.toContain('Authorization');
+                expect(line).not.toContain('Bearer ');
+                expect(line).not.toContain(apiKey);
+                expect(line).not.toContain('X-Synexus-Entity');
+            });
+        });
+
+        it.each([
+            [502, 'Bad Gateway'],
+            [503, 'Service Unavailable'],
+            [504, 'Gateway Timeout']
+        ])('HTTP %i (%s) rechazado por axios y luego 200: dos llamadas, línea con "HTTP <status>" y resuelve con el 200', async (status, statusText) => {
+            const wait = jest.fn(async () => {});
+            const firstError = createAxiosError({
+                response: { status: status, statusText: statusText, data: { error: 'upstream_unavailable' } }
+            });
+            axios.mockRejectedValueOnce(firstError).mockResolvedValueOnce(okResponse());
+            const client = createClient(undefined, { wait: wait });
+
+            const result = await client.makeRequest('get_tax', createRequestBody(), entityCode);
+
+            expect(result).toEqual({ total_tax: '0.00' });
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(axios.mock.calls[0][0].data).toBe(axios.mock.calls[1][0].data);
+            expect(wait).toHaveBeenCalledTimes(1);
+            expect(wait).toHaveBeenCalledWith(1000);
+            const lines = retryLines();
+            expect(lines).toHaveLength(1);
+            expect(lines[0].startsWith('Reintentando (1/1) con la misma llave de idempotencia')).toBe(true);
+            expect(lines[0]).toContain(`HTTP ${status}`);
+        });
+
+        it('timeout dos veces: rechaza con el SEGUNDO error por identidad, axios exactamente dos veces (nunca una tercera), un solo diagnóstico, una sola entrada del logger y una sola espera', async () => {
+            const logger = fakes.createFakeLogger();
+            const wait = jest.fn(async () => {});
+            const firstError = createAxiosError({ code: 'ECONNABORTED', request: {}, message: 'timeout uno' });
+            const secondError = createAxiosError({ code: 'ECONNABORTED', request: {}, message: 'timeout dos' });
+            axios.mockRejectedValueOnce(firstError).mockRejectedValueOnce(secondError).mockResolvedValue(okResponse());
+            const client = createClient(logger, { wait: wait });
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).toBe(secondError);
+            expect(caught).not.toBe(firstError);
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(wait).toHaveBeenCalledTimes(1);
+            const timeoutDiagnostics = consoleErrorSpy.mock.calls
+                .filter(call => call[0] === 'Error en la petición: Timeout de conexión. La petición tardó más de 30 segundos.');
+            expect(timeoutDiagnostics).toHaveLength(1);
+            expect(logger.error).toHaveBeenCalledTimes(1);
+            expect(retryLines()).toHaveLength(1);
+            expectNoCredentialLeak();
+        });
+
+        it('409 invoice_stale_object del cálculo (concurrencia) y luego 200: dos llamadas, línea con invoice_stale_object, resuelve', async () => {
+            const wait = jest.fn(async () => {});
+            axios
+                .mockResolvedValueOnce(fakes.createAxiosResponse(409, { error: 'conflict', code: 'invoice_stale_object', request_id: 'rid-409' }))
+                .mockResolvedValueOnce(okResponse());
+            const client = createClient(undefined, { wait: wait });
+
+            const result = await client.makeRequest('post_tax', createRequestBody(), entityCode);
+
+            expect(result).toEqual({ total_tax: '0.00' });
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(axios.mock.calls[0][0].data).toBe(axios.mock.calls[1][0].data);
+            expect(wait).toHaveBeenCalledWith(1000);
+            const lines = retryLines();
+            expect(lines).toHaveLength(1);
+            expect(lines[0].startsWith(`Reintentando (1/1) con la misma llave de idempotencia (request_id=${ownRequestId})`)).toBe(true);
+            expect(lines[0]).toContain('invoice_stale_object');
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - Status: 200 - request_id=no informado por el proveedor');
+        });
+
+        it('409 de cancel_tax (sin code, documentado como seguro) y luego 200: dos llamadas con el mismo cuerpo por identidad y la línea sin llave', async () => {
+            const wait = jest.fn(async () => {});
+            axios
+                .mockResolvedValueOnce(fakes.createAxiosResponse(409, { error: 'conflict', message: 'busy' }))
+                .mockResolvedValueOnce(cancelOkResponse());
+            const client = createClient(undefined, { wait: wait });
+            const cancelBody = createCancelBody();
+
+            const result = await client.makeRequest('cancel_tax', cancelBody, entityCode);
+
+            expect(result).toEqual({ message: 'Invoice cancelled' });
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(axios.mock.calls[0][0].data).toBe(axios.mock.calls[1][0].data);
+            expect(axios.mock.calls[1][0].data).toBe(cancelBody);
+            expect(axios.mock.calls[1][0].url).toBe(cancelUrl);
+            expect(client.synexusConfig.getCancelUrl).toHaveBeenCalledTimes(1);
+            expect(wait).toHaveBeenCalledTimes(1);
+            expect(wait).toHaveBeenCalledWith(1000);
+            const lines = retryLines();
+            expect(lines).toHaveLength(1);
+            expect(lines[0].startsWith('Reintentando (1/1) con el mismo cuerpo tras HTTP 409 en la cancelación')).toBe(true);
+            expect(lines[0]).toContain('no lleva llave');
+            expect(lines[0]).not.toContain('request_id=');
+        });
+
+        it('409 de cancel_tax dos veces: rechaza con el mensaje de cancelación clasificado ("chocó"), axios dos veces', async () => {
+            const logger = fakes.createFakeLogger();
+            axios.mockResolvedValue(fakes.createAxiosResponse(409, { error: 'conflict', message: 'busy' }, { 'x-request-id': 'rid-409-c' }));
+            const client = createClient(logger);
+
+            const { caught } = await run(client, 'cancel_tax', createCancelBody());
+
+            expect(caught).not.toBeNull();
+            expect(caught.message.startsWith('Error HTTP 409: ')).toBe(true);
+            expect(caught.message).toContain('chocó');
+            expect(caught.message).toContain('Mensaje del proveedor: "busy"');
+            expect(caught.message).toContain('request_id=rid-409-c');
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(client.wait).toHaveBeenCalledTimes(1);
+            expect(retryLines()).toHaveLength(1);
+            // _handleResponse corre una sola vez, sobre el segundo intento
+            const receivedTraces = consoleLogSpy.mock.calls
+                .filter(call => typeof call[0] === 'string' && call[0].startsWith('Respuesta recibida'));
+            expect(receivedTraces).toHaveLength(1);
+        });
+
+        it('timeout en la cancelación y luego 200: también reintenta, con la línea sin llave', async () => {
+            axios.mockRejectedValueOnce(createAxiosError({ code: 'ECONNABORTED', request: {} })).mockResolvedValueOnce(cancelOkResponse());
+            const client = createClient();
+
+            const result = await client.makeRequest('cancel_tax', createCancelBody(), entityCode);
+
+            expect(result).toEqual({ message: 'Invoice cancelled' });
+            expect(axios).toHaveBeenCalledTimes(2);
+            const lines = retryLines();
+            expect(lines).toHaveLength(1);
+            expect(lines[0].startsWith('Reintentando (1/1) con el mismo cuerpo tras timeout (ECONNABORTED)')).toBe(true);
+            expect(lines[0]).toContain('la cancelación no lleva llave de idempotencia');
+        });
+    });
+
+    describe('lo que NUNCA se reintenta: una sola llamada, sin espera y sin anuncio', () => {
+        it('500 rechazado por axios: una sola llamada, wait sin llamadas, ninguna línea Reintentando', async () => {
+            const error = createAxiosError({
+                response: { status: 500, statusText: 'Internal Server Error', data: { error: 'boom' } }
+            });
+            axios.mockRejectedValue(error);
+            const client = createClient();
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).toBe(error);
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+
+        it.each([
+            ['ECONNREFUSED'],
+            ['ENOTFOUND']
+        ])('%s: una sola llamada, sin espera (un backend caído no mejora en un segundo)', async (code) => {
+            const error = createAxiosError({ code: code, request: {} });
+            axios.mockRejectedValue(error);
+            const client = createClient();
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).toBe(error);
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+
+        it('un error sin código ni respuesta (genérico) tampoco se reintenta', async () => {
+            const error = createAxiosError({ message: 'algo inesperado' });
+            axios.mockRejectedValue(error);
+            const client = createClient();
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).toBe(error);
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+        });
+
+        it.each([
+            [401, 'invalid_key'],
+            [422, 'tax_code_missing'],
+            [429, 'rate_limited']
+        ])('%i %s resuelto: una sola llamada, sin espera, y el mensaje clasificado del plan 02-03', async (status, code) => {
+            axios.mockResolvedValue(fakes.createAxiosResponse(status, { error: 'x', code: code, request_id: 'rid-no' }));
+            const client = createClient();
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).not.toBeNull();
+            expect(caught.message.startsWith(`Error HTTP ${status} (${code}): `)).toBe(true);
+            expect(caught.message).toContain('request_id=rid-no');
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+
+        it('409 idempotency_key_conflict del cálculo: UNA llamada, sin espera, sin línea Reintentando, y el mensaje dice que no se reintenta', async () => {
+            axios.mockResolvedValue(fakes.createAxiosResponse(409, { error: 'conflict', code: 'idempotency_key_conflict', request_id: 'rid-ikc' }));
+            const client = createClient();
+
+            const { caught } = await run(client, 'post_tax', createRequestBody());
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('(idempotency_key_conflict)');
+            expect(caught.message).toContain('No se reintenta');
+            expect(caught.message).toContain('request_id=rid-ikc');
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+
+        it('409 del cálculo SIN code: una sola llamada (sin código no hay razón segura para repetir)', async () => {
+            axios.mockResolvedValue(fakes.createAxiosResponse(409, { error: 'conflict' }));
+            const client = createClient();
+
+            const { caught } = await run(client, 'get_tax', createRequestBody());
+
+            expect(caught).not.toBeNull();
+            expect(caught.message.startsWith('Error HTTP 409: ')).toBe(true);
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+
+        it('un 200 a la primera: una sola llamada y sin espera', async () => {
+            axios.mockResolvedValue(okResponse());
+            const client = createClient();
+
+            await client.makeRequest('get_tax', createRequestBody(), entityCode);
+
+            expect(axios).toHaveBeenCalledTimes(1);
+            expect(client.wait).not.toHaveBeenCalled();
+            expect(retryLines()).toHaveLength(0);
+        });
+    });
+});
+
 describe('SynexusApiClient — envoltorios getTax, postTax y cancelTax', () => {
     it('getTax(requestBody, entityCode) delega en makeRequest con la operación get_tax', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
         const makeRequestSpy = jest.spyOn(client, 'makeRequest');
         const requestBody = createRequestBody();
 
@@ -1344,7 +1738,7 @@ describe('SynexusApiClient — envoltorios getTax, postTax y cancelTax', () => {
 
     it('postTax(requestBody, entityCode) delega en makeRequest con la operación post_tax', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
         const makeRequestSpy = jest.spyOn(client, 'makeRequest');
         const requestBody = createRequestBody();
 
@@ -1357,7 +1751,7 @@ describe('SynexusApiClient — envoltorios getTax, postTax y cancelTax', () => {
 
     it('cancelTax(requestBody, entityCode) delega en makeRequest con la operación cancel_tax', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
         const makeRequestSpy = jest.spyOn(client, 'makeRequest');
         const cancelBody = createCancelBody();
 
@@ -1370,7 +1764,7 @@ describe('SynexusApiClient — envoltorios getTax, postTax y cancelTax', () => {
     });
 
     it('ofrece los tres envoltorios: getTax, postTax y cancelTax son funciones', () => {
-        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const client = createClient();
         expect(typeof client.getTax).toBe('function');
         expect(typeof client.postTax).toBe('function');
         expect(typeof client.cancelTax).toBe('function');

@@ -21,6 +21,9 @@
 //   - la línea de éxito lleva el X-Request-Id del proveedor y un 404 lanza
 //     clasificado por status, citando el mensaje del proveedor y el id
 //     (SAFE-06, SAFE-05)
+//   - un 409 (documentado como seguro de reintentar) provoca UN reintento con
+//     la misma proyección por identidad, y el archivo se escribe una vez con
+//     el 200 del segundo intento (SAFE-02)
 //   - COMP-01: cancel_tax sin selector sigue siendo el GET de v1 contra
 //     CancelTransaction, con el archivo v1 ENTERO y sin Authorization
 //
@@ -146,7 +149,9 @@ const buildGraph = (args, requestBody) => {
     let synexusApiClient = null;
     if (apiVersion === 'v2') {
         synexusConfig = new SynexusConfig();
-        synexusApiClient = new SynexusApiClient(synexusConfig, logger);
+        // index.js no pasa opciones y hereda la espera real de 1000 ms entre
+        // intentos; la opción sólo quita el sueño de la suite (SAFE-02).
+        synexusApiClient = new SynexusApiClient(synexusConfig, logger, { wait: async () => {} });
     }
 
     const handler = new TaxCommandHandler(
@@ -479,5 +484,40 @@ describe('Recorrido completo — cancel_tax sin selector es el GET de v1 contra 
             path.join(config.getOutputDir(), 'RESPONSE_c.json'),
             v1Response
         );
+    });
+});
+
+describe('SAFE-02 de punta a punta — el 409 de la cancelación se reintenta una vez con la misma proyección', () => {
+    const args = ['cancel_tax', 'c.json', '--api-version=v2', '--entity=USA'];
+
+    it('409 y luego 200: axios dos veces contra la URL de cancelación, data idéntico por identidad e igual a { invoice_id, customer_id } en las dos, archivo escrito una vez con el 200', async () => {
+        const cancelResponse = createCancelResponse();
+        axios
+            .mockResolvedValueOnce(fakes.createAxiosResponse(409, { error: 'conflict', message: 'Invoice is being processed' }))
+            .mockResolvedValueOnce(fakes.createAxiosResponse(200, cancelResponse, { 'x-request-id': 'rid-cancel-retry' }));
+        const graph = buildGraph(args, createCancelFile());
+
+        await graph.handler.execute(args);
+
+        expect(axios).toHaveBeenCalledTimes(2);
+        const firstCall = axios.mock.calls[0][0];
+        const secondCall = axios.mock.calls[1][0];
+        expect(firstCall.url).toBe(v2CancelUrl);
+        expect(secondCall.url).toBe(v2CancelUrl);
+        expect(firstCall.data).toBe(secondCall.data);
+        expect(firstCall.data).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+        expect(secondCall.data).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+        expect(secondCall.headers).toEqual(firstCall.headers);
+        expect(graph.fileManager.writeJsonFile).toHaveBeenCalledTimes(1);
+        expect(graph.fileManager.writeJsonFile.mock.calls[0][1]).toBe(cancelResponse);
+        const retryLine = capturedConsoleOutput().find(line => line.startsWith('Reintentando (1/1)'));
+        expect(retryLine).toBeDefined();
+        expect(retryLine).toContain('HTTP 409 en la cancelación');
+        expect(retryLine).toContain('no lleva llave');
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: cancel_tax - Status: 200 - request_id=rid-cancel-retry');
+        expect(graph.logger.error).not.toHaveBeenCalled();
+        capturedConsoleOutput().forEach(line => {
+            expect(line).not.toContain(v2ApiKey);
+        });
     });
 });
