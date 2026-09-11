@@ -1425,6 +1425,41 @@ describe('SynexusApiClient — SAFE-02: un solo reintento en proceso, con el mis
     });
 
     describe('lo que SÍ se reintenta, una sola vez y con el mismo cuerpo', () => {
+        // WR-02 (review Fase 2): las aserciones "wait fue llamado con 1000" pasan
+        // aunque se quite el await de this.wait(...). Estos dos casos exigen que el
+        // segundo intento NO ocurra hasta que la espera resuelva, y que una espera
+        // que rechaza corte el reintento en vez de ignorarse.
+        it('WR-02: el segundo intento espera de verdad — con la espera detenida, axios va en 1; al liberarla, en 2', async () => {
+            let releaseWait;
+            const wait = jest.fn(() => new Promise(resolve => { releaseWait = resolve; }));
+            axios.mockRejectedValueOnce(createAxiosError({ code: 'ECONNABORTED', request: {} }))
+                 .mockResolvedValueOnce(okResponse());
+            const client = createClient(fakes.createFakeLogger(), { wait: wait });
+
+            const pending = client.makeRequest('get_tax', createRequestBody(), entityCode);
+            // Dar la vuelta al event loop: el primer intento falló y se pidió la espera
+            await new Promise(resolve => setImmediate(resolve));
+            expect(wait).toHaveBeenCalledTimes(1);
+            expect(axios).toHaveBeenCalledTimes(1);   // ← sin await, aquí ya sería 2
+
+            releaseWait();
+            const result = await pending;
+            expect(axios).toHaveBeenCalledTimes(2);
+            expect(result).toEqual({ total_tax: '0.00' });
+        });
+
+        it('WR-02: si la espera rechaza, no hay segundo intento y el rechazo de la espera es el que se propaga', async () => {
+            const waitFailure = new Error('temporizador roto');
+            const wait = jest.fn(async () => { throw waitFailure; });
+            axios.mockRejectedValueOnce(createAxiosError({ code: 'ECONNABORTED', request: {} }))
+                 .mockResolvedValueOnce(okResponse());
+            const client = createClient(fakes.createFakeLogger(), { wait: wait });
+
+            await expect(client.makeRequest('get_tax', createRequestBody(), entityCode)).rejects.toBe(waitFailure);
+            expect(axios).toHaveBeenCalledTimes(1);
+            expectNoCredentialLeak();
+        });
+
         it('timeout (ECONNABORTED) y luego 200: dos llamadas con el MISMO objeto data (misma llave), espera de 1000 ms pedida una vez, anuncio en stdout, y resuelve con el 200 sin diagnóstico ni log del primer intento', async () => {
             const logger = fakes.createFakeLogger();
             const wait = jest.fn(async () => {});
