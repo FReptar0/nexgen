@@ -18,8 +18,12 @@ Revert a previously committed tax transaction by hitting the
 > either field is missing/empty the run aborts before any request with
 > `Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y
 > "customer_id"; falta(n): …`. A v1-shaped file (`Committed`) under v2
-> aborts with `parece del contrato v1`. Do not add the flag here unless
-> the user asks for v2; everything below describes v1.
+> aborts with `parece del contrato v1`. Cancel errors under v2 carry no
+> `code`: they are classified by HTTP status (400/404/409/422) as `Error
+> HTTP <status>: <Spanish description> Mensaje del proveedor: "<verbatim>"
+> - request_id=<X-Request-Id>` (plan 02-03), and the success line carries
+> the same header id. Do not add the flag here unless the user asks for
+> v2; everything below describes v1.
 
 > **Note on TEST_MODE**: `cancel_tax` **does not respect `TEST_MODE`**.
 > The URL is always `<BASE_URL>CancelTransaction` regardless. If you

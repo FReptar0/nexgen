@@ -23,8 +23,13 @@ outcome.
 > v2 shape (no `Committed`; a file with `committed: false` or
 > `transaction_type: "sales_estimate"` aborts before any request), the
 > `SYNEXUS_*` variables must be set, and the response is written verbatim
-> to `RESPONSE_<file>.json` with amounts as quoted strings. Do not add the
-> flag unless the user asks for v2; everything below describes v1.
+> to `RESPONSE_<file>.json` with amounts as quoted strings. The success
+> line carries the provider's id (`… - request_id=<meta.request_id>`) and a
+> 4xx surfaces classified by `code` — `Error HTTP <status> (<code>):
+> <Spanish description> - request_id=<id>` (plan 02-03); a `409
+> idempotency_key_conflict` means the file changed between runs and must
+> **not** be re-run blindly. Do not add the flag unless the user asks for
+> v2; everything below describes v1.
 
 ## Pre-flight (mandatory)
 
@@ -76,7 +81,8 @@ Before invoking `node`, confirm these out loud to the user:
 
 - Validation failure: print the exact Spanish error message.
 - HTTP 4xx: the wire body was rejected. Show the full server message
-  from the `_handleError` output.
+  from the `_handleError` output (under v2 the thrown message already
+  names the `code` and the `request_id`; quote both).
 - HTTP 5xx: the API is unhappy. Don't retry blindly — escalate per
   `RUNBOOK.md` §8.
 - Network failure: see `RUNBOOK.md` §4.1.

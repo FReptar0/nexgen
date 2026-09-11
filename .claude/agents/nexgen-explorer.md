@@ -20,7 +20,7 @@ src/cli/taxCommandHandler.js              → argv parse (flags + positionals), 
 src/validators/taxValidator.js            → Committed rules + sanitization (+ v2 intent rules)
 src/api/taxApiClient.js                   → v1: axios GET-with-body to STCCalcV3* (FROZEN)
 src/api/synexusRequestBuilder.js          → v2: intent fields + request_id on top of the file
-src/api/synexusApiClient.js               → v2: axios POST, Authorization: Bearer, X-Synexus-Entity
+src/api/synexusApiClient.js               → v2: axios POST, Authorization: Bearer, X-Synexus-Entity; errors classified by `data.code` (calculation) / HTTP status (cancel); `request_id=` on every run
 src/storage/fileManager.js                → JSON I/O, RESPONSE_<name>.json
 src/infrastructure/logger.js              → winston, error-only, daily file
 src/config/index.js                       → dotenv + v1 endpoint resolution + getApiVersion()
@@ -126,8 +126,13 @@ ensureDirectory: yes (recursive)
 ## Error model
 - on validation fail: exit 1, message logged to stderr + logs/log_<today>.log
 - on HTTP 4xx: exit 1, axios resolves (validateStatus < 500), throws in _handleResponse
+  (v2: `Error HTTP <status> (<code>): <Spanish description> - request_id=<id>` for the
+  calculation route, classified by `data.code`; `Error HTTP <status>: <description>` for
+  cancel, classified by status with the provider `message` quoted verbatim)
 - on HTTP 5xx: exit 1, axios throws, caught by _handleError
-- on success: stdout "SUCCESS: …", exit 0
+  (v2: the diagnostic block ends with `Identificador para soporte: request_id=…`,
+  the provider's id when it answered, nexgen's own when it did not)
+- on success: stdout "SUCCESS: …", exit 0 (v2: `… - request_id=<meta.request_id | X-Request-Id>`)
 
 ## Citations
 - <file>:<line range> — what it does

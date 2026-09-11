@@ -16,7 +16,12 @@ came back.
 > optional `--entity=<code>`. Under v2 the fixture must be in v2 shape
 > (no `Committed` field; nexgen adds `transaction_type: "sales_estimate"`,
 > `committed: false` and `request_id` itself) and the `SYNEXUS_*`
-> variables must be set. Do not add the flag unless the user asks for v2.
+> variables must be set. Under v2 the client's success line reads
+> `SUCCESS: get_tax - Status: 200 - request_id=<provider id>` and a 4xx
+> surfaces as `Error HTTP <status> (<code>): <Spanish description> -
+> request_id=<id>` (plan 02-03): when reporting, quote the `code` and the
+> `request_id` — they are what the provider asks for in support. Do not
+> add the flag unless the user asks for v2.
 
 ## Pre-flight checks
 
