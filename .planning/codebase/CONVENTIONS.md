@@ -1,137 +1,135 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-09-10
+**Analysis Date:** 2026-09-11
+
+No linter and no formatter are configured anywhere in this repository (no
+`.eslintrc*`, no `eslint.config.*`, no `.prettierrc*`, no `biome.json`, no
+lint/format `devDependency` in `package.json`). Every convention below is
+enforced by human consistency and copy-from-the-nearest-analog, not by
+tooling — verified by reading all 9 files in `src/`, `index.js`, and the
+`tests/` suite, and by `grep` for the boundary rules called out below.
 
 ## Naming Patterns
 
 **Files:**
-- English camelCase for every implementation file: `taxApiClient.js`, `taxCommandHandler.js`, `taxValidator.js`, `fileManager.js`, `logger.js`.
-- Each layer directory's module file is named `index.js` when it exports a singleton (`src/config/index.js`); otherwise the file is named after its class (`src/api/taxApiClient.js`).
-- Root entry point is `index.js`.
+- `camelCase.js`, matching the class it exports, lower-cased: `taxCommandHandler.js` exports `TaxCommandHandler`, `synexusApiClient.js` exports `SynexusApiClient`, `fileManager.js` exports `FileManager`.
+- Test files: `<subject>.test.js` under `tests/`, either mirroring one `src/` module (`synexusConfig.test.js` ↔ `src/config/synexusConfig.js`) or named after the guarantee it protects when it spans multiple files (`v1Freeze.wire.test.js`, `v2QuoteEndToEnd.test.js`).
+- One shared test helper file: `tests/helpers/fakes.js`. No other shared helpers exist — see `TESTING.md` §Fixtures.
 
 **Functions/Methods:**
-- camelCase always: `makeRequest`, `validateOperation`, `getEndpointUrl`, `sanitizeStringFields`, `ensureDirectory`.
-- Private/internal helper methods are prefixed with a leading underscore: `_handleResponse`, `_handleError`, `_saveResponse`, `_validateRequiredEnvVars`, `_ensureLogDir`, `_createLogger`, `_handleFileReadError`, `_listSimilarFiles`. This is a naming convention only — JavaScript's `#private` syntax is never used, so these are still callable from outside the class.
+- Public methods: camelCase verbs — `validateOperation`, `makeRequest`, `resolveEntityCode`, `getEndpointUrl`, `parseArguments`.
+- Private/internal helpers: single leading underscore + camelCase — `_handleResponse`, `_handleError`, `_saveResponse`, `_validateRequiredEnvVars`, `_ensureLogDir`, `_createLogger`, `_handleFileReadError`, `_listSimilarFiles`, `_maskApiKey`, `_getConfiguredUrl`, `_findKeyPrefix`, `_validateKeyHostMatch`, `_generateRequestId`, `_assertIntentFieldsPresent`, `_executeV2`. This is a naming convention only — the language-level `#private` syntax is never used anywhere in the repo.
 
 **Variables:**
-- camelCase: `requestBody`, `filePath`, `outputDir`, `sanitizedRequestBody`, `responseFileName`.
-- No `UPPER_SNAKE_CASE` module-level constants exist anywhere. Fixed lists live as instance properties assigned in the constructor, e.g. `this.validOperations = ['get_tax', 'post_tax', 'cancel_tax'];` (`src/validators/taxValidator.js:15`), not as exported top-level constants.
+- camelCase everywhere: `requestBody`, `sanitizedRequestBody`, `resolvedEntityCode`, `axiosCallArgument`.
+- No `UPPER_SNAKE_CASE` constants, including for fixed lists. Lists that another codebase might hoist to a module-level constant are instance properties assigned in the constructor instead: `this.validOperations = ['get_tax', 'post_tax', 'cancel_tax']` (`src/validators/taxValidator.js:15`), `this.knownFlags = ['--api-version=', '--entity=']` (`src/cli/taxCommandHandler.js:37`), `this.entityHeaderName = 'X-Synexus-Entity'` (`src/api/synexusApiClient.js:32`), `this.keyPrefixHosts = {...}` (`src/config/synexusConfig.js:29`). Follow this shape for any new fixed list — do not introduce a top-level `const FOO = [...]`.
 
 **Classes:**
-- PascalCase, exactly one class per file, name matches the file's purpose: `TaxCommandHandler` (`src/cli/taxCommandHandler.js`), `TaxValidator` (`src/validators/taxValidator.js`), `TaxApiClient` (`src/api/taxApiClient.js`), `FileManager` (`src/storage/fileManager.js`), `Logger` (`src/infrastructure/logger.js`), `Config` (`src/config/index.js`).
+- PascalCase, exactly one exported class per file, matching the filename: `TaxValidator`, `TaxApiClient`, `TaxCommandHandler`, `FileManager`, `Logger`, `Config`, `SynexusConfig`, `SynexusApiClient`, `SynexusRequestBuilder`.
 
-**Directories:**
-- Lowercase, one per architectural layer, named for the layer's role (not the domain): `cli/`, `validators/`, `api/`, `storage/`, `infrastructure/`, `config/`.
+**Types:**
+- No TypeScript, no JSDoc `@typedef` catalog. Object shapes are documented inline via JSDoc `@param`/`@returns`, e.g. `@returns {{ transaction_type: string, committed: boolean }}` (`src/api/synexusRequestBuilder.js:39`).
 
 ## Code Style
 
 **Formatting:**
-- No formatter or linter is configured anywhere in the repo — no `.eslintrc*`, `eslint.config.*`, `.prettierrc*`, or `biome.json` exist. Style is enforced by convention/review only. `CLAUDE.md` confirms this explicitly: "No tests, no CI, no linter."
-- Indentation: 4 spaces, consistent across every file in `src/` and `index.js`.
-- Quotes: single quotes for string literals (192 single-quote characters vs. 24 double-quote characters across the codebase). Double quotes appear only *inside* string content — e.g. quoting an operation name in a user-facing message (`'Para la operación get_tax, el valor "Committed" debe ser false.'` in `src/validators/taxValidator.js:41`) — never as the JS string delimiter itself.
-- Semicolons: always present; no reliance on ASI.
-- Template literals (`` `...${x}...` ``) are used for interpolation; plain string concatenation with `+`/`+=` only appears for building multi-line messages (`src/cli/taxCommandHandler.js:36-37`, `src/api/taxApiClient.js:98-129`).
-- Callbacks: arrow functions for inline callbacks (`.forEach`, `.filter`, the `JSON.stringify` replacer in `src/validators/taxValidator.js:79`). One exception uses the `function` keyword — the axios `validateStatus` option (`src/api/taxApiClient.js:44`). Prefer arrow functions for new inline callbacks to match the dominant pattern.
+- No tool. Style consistency observed across every `src/` file and `tests/`: 4-space indentation, single quotes for strings, semicolons always, template literals for interpolation, arrow functions for inline callbacks (`.map`, `.filter`, `.find`, `beforeEach`/`it` bodies).
+- Double quotes are used only when the string literal itself contains an apostrophe, to avoid escaping: `body.customer_id = "Plummer's";` (`tests/argumentParsing.test.js:371`). Do not escape apostrophes inside single-quoted test fixtures — switch the outer quote to double instead.
 
 **Linting:**
-- None configured. Treat a pattern repeated 2+ times across files as the de facto rule; otherwise follow this document.
+- None configured. When adding new code, match the nearest existing file in the same directory rather than inventing a new shape.
 
 ## Import Organization
 
-**Order (consistent in every file that has more than one import):**
-1. Node built-ins (`path`, `fs`)
-2. Third-party packages (`axios`, `winston`, `dotenv`)
-3. Local/relative requires — only `index.js` does this, requiring each `./src/<layer>` module in construction order.
+**Order:**
+1. Node builtins (`path`, `crypto`, `fs`, `http`, `https`)
+2. Third-party packages (`axios`, `dotenv`, `winston`)
+3. Local `src/...` requires (relative paths)
 
-**Style:**
-- CommonJS exclusively: `require(...)` / `module.exports = ClassName`. No ESM `import`/`export` anywhere; `package.json` has no `"type": "module"`.
-- Never destructure a require: always `const Name = require('module')`, never `const { x } = require('module')`.
-- No path aliases. All requires are relative (`./src/...`) or bare package names.
-- No barrel/index re-export files. `src/config/index.js` is the module itself (a singleton instance), not an aggregator of other modules.
+Every `src/` file and `index.js` opens with a `// path/to/file.js` header comment naming its own repo-relative path, before any `require` statement. Add this header to any new file.
+
+**Path Aliases:**
+- None. All local requires are relative (`require('../config')`, `require('./src/config')`). There is no `tsconfig.json`/`jsconfig.json` defining `paths`.
+
+**Module System:**
+- CommonJS exclusively (`require` / `module.exports`). No `import`/`export` syntax, no `"type": "module"` in `package.json`. Do not introduce ESM syntax — Node 14 (the stated minimum, see root `CLAUDE.md`) does not support it without a flag.
 
 ## Error Handling
 
-**Pattern: throw/catch only, never result objects.**
-- Every layer that detects an invalid state does `throw new Error('<Spanish message>')`. There are no custom `Error` subclasses anywhere in the codebase (no `.code` property, no `TaxValidationError` class) — always the built-in `Error`.
-- The `return { ok: false, error }` pattern is never used (confirmed by `docs/MEMORY.md` convention C4 — "No se usa el patrón `return { ok: false, error: ... }`. Todo es throw/catch.").
-- Errors are logged at the point of detection (`console.error(...)` then `this.logger.error(...)`) and then re-thrown, so a single failure can print at multiple layers on its way up before `index.js` prints the final `\n❌ La operación falló. Revise los logs para más detalles.` and calls `process.exit(1)`.
-- `index.js:34-66` (`main()`) contains the *only* top-level `try/catch` that terminates the process. Every other `try/catch` in the codebase re-throws after logging — see `src/cli/taxCommandHandler.js:87-92` and `src/api/taxApiClient.js:51-54`.
-- Each layer implements its own private `_handleError`/`_handleResponse`/`_handleFileReadError` method so the catch block's formatting/diagnostic logic stays out of the main method body — this "catch-and-translate" helper is repeated in `taxCommandHandler.js`, `taxApiClient.js`, and `fileManager.js`.
+The dominant pattern — used at essentially every validation and failure point across `src/validators/taxValidator.js`, `src/api/taxApiClient.js`, `src/api/synexusApiClient.js`, `src/api/synexusRequestBuilder.js`, `src/cli/taxCommandHandler.js`, and `src/config/*.js` — is the **"trío del fallo"** (fail trio): build the message once, print it, log it, then throw a plain `Error` constructed from the same string.
 
-**Example (`src/validators/taxValidator.js:38-46`):**
 ```javascript
-validateCommittedField(operation, requestBody) {
-    if (operation === 'get_tax') {
-        if (requestBody.Committed !== false) {
-            const errorMsg = 'Para la operación get_tax, el valor "Committed" debe ser false.';
-            console.error(errorMsg);
-            this.logger.error(errorMsg);
-            throw new Error(errorMsg);
-        }
-    } else if (operation === 'post_tax') {
-        // ... same pattern, inverted condition
-    }
-    // cancel_tax no valida el campo Committed
-}
+const errorMsg = 'Mensaje en español que explica qué pasó y qué se esperaba.';
+console.error(errorMsg);
+this.logger.error(errorMsg);
+throw new Error(errorMsg);
 ```
+
+Real example (`src/validators/taxValidator.js:41-44`):
+```javascript
+const errorMsg = 'Para la operación get_tax, el valor "Committed" debe ser false.';
+console.error(errorMsg);
+this.logger.error(errorMsg);
+throw new Error(errorMsg);
+```
+
+**Rules to follow for any new failure path:**
+- Always `new Error(message)`. No custom `Error` subclasses, no `error.code`, no discriminated result objects (`{ ok: false, error }` is never used anywhere in this repo).
+- Errors are thrown, never returned. `TaxCommandHandler.execute()` (`src/cli/taxCommandHandler.js:142-190`) is the one place that catches broadly — `_handleError(error)` prints/logs, then **re-throws**. `index.js`'s `main()` (`index.js:37-87`) is the only `try/catch` in the whole codebase that swallows: it prints one generic Spanish message and calls `process.exit(1)` — see `src/infrastructure/logger.js`/`index.js:82-86`.
+- `logger.error` calls often append machine-diagnosable context after the human message, joined with ` - `: `` `${errorMsg} - URL: ${url} - Operation: ${operation}` `` (`src/api/taxApiClient.js:79`; mirrored in `src/api/synexusApiClient.js:96,159` and `src/api/synexusRequestBuilder.js:57`).
+- State-transition guards (`Committed`/`committed` fields) always compare with strict `===`/`!==`, never truthy checks: a string `"false"` or a numeric `0` must be rejected exactly like an explicit contradiction (`src/validators/taxValidator.js:82,93` — `validateV2IntentFields`; exercised heavily in `tests/v2IntentValidation.test.js`).
+- Guard order matters and is commented with numbered steps precisely because later validations assume earlier ones already ran (e.g. `validateV2IntentFields` checks the v1 "Committed" leak *before* checking the intent-contradiction cases, `src/validators/taxValidator.js:68-111`). Preserve existing guard ordering when editing; add new guards at the position their comment block indicates, not just appended at the end.
+- A discriminated-result-type alternative to throwing is discussed in `ARCHITECTURE.md` (`SAFE-05`) but is explicitly deferred — do not introduce it without an explicit ask.
 
 ## Logging
 
-**Framework:** winston, wrapped by the `Logger` class in `src/infrastructure/logger.js`.
+**Framework:** `winston` (`src/infrastructure/logger.js`), wrapped in a project `Logger` class with exactly four public methods: `error`, `info`, `warn`, `debug`. Both the winston logger and its single file transport are constructed with `level: 'error'`, and the log file name embeds the date at **construction** time (`log_<YYYY-MM-DD>.log`).
 
 **Patterns:**
-- `logger.error(message)` is the only method that actually persists to disk — the winston instance is hard-coded to `level: 'error'` (`src/infrastructure/logger.js:35`). `logger.info`, `logger.warn`, and `logger.debug` exist as methods but are no-ops at the file transport; do not rely on them for anything that must be recorded.
-- Use `console.log` for trace/progress output aimed at a human or wrapper process watching stdout — this is the de facto "info channel" in this codebase (there is no gated log-level check before `console.log` calls).
-- Use `console.error` for stderr-visible errors, always paired with a `this.logger.error(...)` call carrying the same or a more detailed message.
-- Messages passed to `logger.error` should carry enough context to diagnose without re-reading the source — operation name, URL, file path — e.g. `` `${errorMsg} - Operation: ${operation} - URL: ${url}` `` (`src/api/taxApiClient.js:133`).
-- Never call `process.env` or `fs`/`axios` directly to implement logging elsewhere — always go through the injected `Logger` instance.
+- `console.log` / `console.error` is the operator-facing trace channel (stdout/stderr) — used liberally for request/response tracing, saved-file paths, and step-by-step progress. This is intentional, not leftover debug code (root `CLAUDE.md`: "Use `console.log` for trace output").
+- `logger.error` is reserved for the persisted audit trail. Every thrown error is logged via the trío above (or via the centralized `_handleError` catch in `src/cli/taxCommandHandler.js:284-287`) immediately before or during the throw.
+- `logger.info` / `logger.warn` / `logger.debug` are wired but are **no-ops in practice**: the file transport's `level: 'error'` silently drops anything less severe. Do not rely on them for anything that must be observable — use `console.log`.
+- Never print or log secrets. `src/api/synexusApiClient.js:107-116` carries an explicit warning comment: never serialize `error.config`, `error.request`, or call an axios error's `toJSON()`, because those objects embed the full outgoing request including the `Authorization: Bearer <key>` header. `_handleError` in both API clients hand-picks only `error.code`, `error.message`, `error.response.status`, and `error.response.data` for display.
 
 ## Comments
 
 **When to Comment:**
-- Every public method gets a full JSDoc block (`@param`, `@returns`, `@throws`) written in Spanish, even when the method is short and its behavior looks self-explanatory from the name.
-- Every file opens with a single-line comment giving its repo-relative path, e.g. `// src/validators/taxValidator.js`. This is present in all 7 source files without exception — add it to any new file.
-- Every class has a JSDoc block above it stating its "Responsabilidad" (single responsibility) and which SOLID principle it embodies, e.g. `src/storage/fileManager.js:5-9`.
-- Inline comments explain *why*, not *what*, and are written in Spanish — e.g. `// cancel_tax no valida el campo Committed` (`src/validators/taxValidator.js:54`).
+- Every file (all of `src/`, `index.js`) opens with a `// path/to/file.js` header before any code.
+- Every class carries a JSDoc block stating its architectural layer, its single responsibility in one sentence, and — for most classes — the SOLID principle and pattern it embodies, e.g. `Principio SOLID: Single Responsibility Principle (SRP)`, `Patrón: Dependency Injection` (`src/api/taxApiClient.js:4-9`, `src/storage/fileManager.js:5-9`, `src/validators/taxValidator.js:3-7`).
+- Non-obvious business rules get a prose comment explaining **why**, not just what: e.g. `src/api/synexusRequestBuilder.js:13-17` on why the intent fields must never be inherited from the input file, `src/config/synexusConfig.js:3-9` on the load-order fragility between `src/config/index.js` and `synexusConfig.js`.
+- Multi-step orchestration methods use inline numbered comments per step (`// 1. ...`, `// 2. ...`) — see `execute()` and `_executeV2()` in `src/cli/taxCommandHandler.js`. Preserve step numbers when inserting a new step; several tests assert call order against these exact steps.
 
-**Language split (do not violate):**
-- Spanish: JSDoc bodies, inline comments, all user-facing and logged error strings.
-- English: class names, method names, variable names, file names.
+**Language split (non-negotiable, verified across every file):**
+- **Spanish:** every JSDoc body, every inline comment, every user-facing or logged error string.
+- **English:** every identifier — class name, method name, variable name, file name (camelCase / PascalCase).
+
+Do not mix these. A new error message in English, or a new method named in Spanish, is a convention violation.
+
+**JSDoc:**
+- Public methods document `@param`, `@returns`, and `@throws` where applicable; `@private` marks internal helpers in addition to the underscore prefix. `tests/helpers/fakes.js` follows the same JSDoc style for its factory functions.
 
 ## Function Design
 
-**Size:** Small and single-purpose. The largest method in the codebase is `_handleError` in `src/api/taxApiClient.js` (~45 lines, lines 97-141) — it is a linear `if`/`else if` chain over `error.code` / `error.response` / `error.request`, not deep nesting.
+**Size:** Small, single-purpose methods are the norm. The exceptions are the multi-step orchestrators (`TaxCommandHandler.execute`, `TaxCommandHandler._executeV2`), which stay as one long method with numbered inline comments rather than being split into many tiny private methods — because the step order itself is the contract under test.
 
-**Parameters:** Positional, never an options-object. Constructors take collaborators positionally in a fixed DI order — e.g. `constructor(config, logger, fileManager, validator, apiClient)` in `TaxCommandHandler` (`src/cli/taxCommandHandler.js:20`). Methods rarely exceed 3 parameters.
+**Parameters:** Always positional, never an options object — including for dependency injection. `TaxCommandHandler`'s constructor takes eight positional collaborators (`config, logger, fileManager, validator, apiClient, synexusConfig, requestBuilder, synexusApiClient` — `src/cli/taxCommandHandler.js:23`). When adding a ninth collaborator, extend the positional list (and every call site, including every test that constructs the class) — do not switch to a config object.
 
-**Return Values:** Methods return a plain value/object on success (`getEndpointUrl` returns a string, `validate` returns the sanitized request body) or return nothing and rely on a thrown exception for the failure path. No method returns `null`/`undefined`/`false` to signal failure — that would break the throw/catch convention above.
-
-**Async:** `async`/`await` is used only for the one genuinely asynchronous boundary — `TaxApiClient.makeRequest` (`src/api/taxApiClient.js:29`) and everything upstream that calls it (`TaxCommandHandler.execute`, `main()`). All filesystem calls use the *synchronous* `fs` API (`readFileSync`, `writeFileSync`, `existsSync`, `mkdirSync`, `readdirSync` — see `src/storage/fileManager.js` and `src/infrastructure/logger.js`); `fs.promises` is never used. Do not introduce async fs calls without updating the full call chain above `FileManager` — it currently assumes synchronous file I/O throughout.
+**Return Values:** A method returns either a plain value/object or a `Promise` (every HTTP call and every file write is `async`). No `{ success, data }`-style result wrapper is used anywhere.
 
 ## Module Design
 
-**Exports:**
-- Every file in `src/` except `src/config/index.js` exports a bare class: `module.exports = ClassName`. Instantiation and wiring happens exclusively in `index.js`.
-- `src/config/index.js` is the one exception: it exports a singleton instance (`module.exports = new Config();`), not the class. `docs/MEMORY.md` (decision D9) documents this as deliberate — load `.env` once via `dotenv` at `require` time and share the same instance everywhere, rather than each layer loading its own copy.
+**Exports:** `module.exports = ClassName` in every file under `src/`, with exactly one exception: `src/config/index.js` exports an **already-constructed singleton** — `module.exports = new Config()` — because its constructor validates required env vars once, at process start, and every consumer should share that one validated instance. Do not replicate the singleton pattern in `src/config/synexusConfig.js`: it deliberately exports the **class**, so `index.js` can construct it conditionally, only once the resolved API contract is `v2` (`index.js:60-65`). A server with no `SYNEXUS_*` variables must be able to keep running v1 untouched.
 
-**Barrel Files:** None. No module re-exports another module's exports.
+**Barrel Files:** None. No `src/*/index.js` re-export barrels other than `src/config/index.js` itself (which is a real module, not a barrel). Every consumer requires the concrete file directly, e.g. `require('../config/synexusConfig')`, never a re-exported alias.
 
-**Dependency Injection:**
-- Strict discipline: a layer never `require`s another layer directly. The only exception is `Config`, a legitimate cross-cutting singleton. All other collaborators are passed into the constructor.
-- Construction order in `index.js:34-59` is bottom-up: `Logger` → `FileManager` → `TaxValidator` → `TaxApiClient` → `TaxCommandHandler`. When adding a new layer/class, wire it the same way in `index.js` (constructor injection, bottom-up) rather than letting the new class `require` its own dependencies.
+**Dependency injection:** Wired exclusively in `index.js`'s `main()`, in one fixed bottom-up order: infrastructure (`Logger`) → storage (`FileManager`) → validation (`TaxValidator`) → API (`TaxApiClient`, `SynexusRequestBuilder`) → contract resolution (`TaxCommandHandler.resolveApiVersion`, then conditionally `SynexusConfig`/`SynexusApiClient`) → CLI (`TaxCommandHandler`). No layer `require`s a sibling layer directly; collaborators only ever arrive through a constructor argument. See `ARCHITECTURE.md` for the full layer diagram.
 
-**Hard-coded constants (changing these is a wire-level/behavioral change — see `docs/MEMORY.md` C6 and `CLAUDE.md` "Do not touch lightly"):**
-- `STCCalcV3`, `STCCalcV3_TEST`, `CancelTransaction` — endpoint name fragments, `src/config/index.js:70,75`.
-- `RESPONSE_` — response filename prefix, `src/storage/fileManager.js:165`.
-- `30000` — HTTP timeout in ms, `src/api/taxApiClient.js:19`.
-- `'error'` — winston log level, `src/infrastructure/logger.js:35`.
-- `['get_tax', 'post_tax', 'cancel_tax']` — valid operations list, `src/validators/taxValidator.js:15`.
-
-## Commit Message Style
-
-- Historical commits are in Spanish, imperative/infinitive mood, descriptive rather than terse: `"Sanitizar campos de texto en la validación de impuestos y actualizar la documentación de TEST_MODE en README.md"` (`ed6b3f2`).
-- Recent commits (post handoff-docs work) switched to Conventional Commits in English: `docs(readme): add handoff section pointing to HANDOFF and friends` (`3150ae2`), `chore(claude): configure Claude Code best-practice integration` (`0216dfe`). Prefer this newer `type(scope): summary` style going forward for consistency with the most recent history.
+**Boundary rules enforced by convention only (each verified directly with `grep -rn` across `src/` and `index.js` on 2026-09-11 — not by a linter):**
+- **`axios`** is required in exactly two files, both under `src/api/`: `src/api/taxApiClient.js` (v1) and `src/api/synexusApiClient.js` (v2). Never `require('axios')` from `src/cli/`, `src/validators/`, `src/config/`, or `src/storage/`.
+- **`fs`** is required in exactly two files: `src/storage/fileManager.js` (all business-data file I/O — reading/writing JSON, checking existence, listing a directory) and `src/infrastructure/logger.js` (`_ensureLogDir` only, to create the log directory before winston's file transport is constructed). This is narrower than "FileManager owns all filesystem access" — `Logger` has its own single, bounded `fs` use for bootstrap. Do not add a third file that touches `fs` directly; route new file I/O through `FileManager`.
+- **`process.env`** is read directly in exactly two files, both under `src/config/`: `src/config/index.js` (v1 settings) and `src/config/synexusConfig.js` (v2 settings). Every other layer receives configuration exclusively through the injected `config`/`synexusConfig` object's getter methods (`getBaseUrl()`, `getApiKey()`, `isTestMode()`, etc.) — never `process.env` directly.
+- **`process.exit`** is called exactly once, in `index.js:85`, inside `main()`'s top-level `catch`. No other file calls `process.exit`; a thrown `Error` is always the mechanism for surfacing failure up to that one call site.
 
 ---
 
-*Convention analysis: 2026-09-10*
+*Convention analysis: 2026-09-11*

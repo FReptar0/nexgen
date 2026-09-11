@@ -75,3 +75,5 @@ results/
 
 # Test files
 test-files
+# Entornos de Postman: guardan llaves. Las colecciones sí se versionan.
+postman/*.postman_environment.json

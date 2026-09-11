@@ -1,104 +1,131 @@
 # External Integrations
 
-**Analysis Date:** 2026-09-10
+**Analysis Date:** 2026-09-11
+
+**Two tax-calculation integrations are live in code simultaneously**, selected per-invocation by a contract selector (see "Contract Selector" below). Neither is a stub: both have a real client, a real config class, and (for v2) a real request builder, all wired in `index.js`.
 
 ## APIs & External Services
 
-**Tax calculation — current production integration:**
-- Magento STCCalcV3 Tax API, hosted as an Azure Functions app. This is the entire reason the CLI exists: read a transaction JSON, call the API, write the response.
-  - SDK/Client: none — raw `axios`, exclusively inside `src/api/taxApiClient.js`.
-  - Auth: Azure Function key passed as a query string parameter, `?code=<API_CODE>` (env var `API_CODE`). No header-based auth, no OAuth.
-  - Host: `syn-magento.azurewebsites.net` per `ARCHITECTURE.md` §9; the actual host recorded in the test Postman environment (`postman/nexgen-test.postman_environment.json`) is `https://syn-stccalcv3-prj20241220140507.azurewebsites.net/api/` — both are Azure Functions app hostnames for the same integration, exact production value comes from the `.env` `BASE_URL`.
-  - Endpoints, resolved in `Config.getEndpointUrl` (`src/config/index.js:65-79`):
-    - `GET <BASE_URL>STCCalcV3?code=<API_CODE>` — `get_tax` / `post_tax`, production (`TEST_MODE` unset/false).
-    - `GET <BASE_URL>STCCalcV3_TEST?code=<API_CODE>` — `get_tax` / `post_tax`, when `TEST_MODE=true`.
-    - `GET <BASE_URL>CancelTransaction` — `cancel_tax`, **always** this path; ignores `TEST_MODE` entirely.
-  - Protocol quirk: HTTP `GET` with a JSON request body (`src/api/taxApiClient.js:36-48`, `data: requestBody` on a `method: 'GET'` axios call). Non-standard but required by the remote contract — `CLAUDE.md` explicitly warns not to "fix" this to `POST` without coordinating with the API team. `docs/MEMORY.md` D6 notes this may break under strict proxies/gateways that strip GET bodies.
-  - Timeout: 30000 ms (`src/api/taxApiClient.js:19`).
-  - Response handling: any HTTP status `< 500` is treated as a normal response (`validateStatus`); status `>= 400` is then thrown as an application error (`_handleResponse`, `src/api/taxApiClient.js:66-88`). Status `>= 500` rejects at the axios layer and is caught by `_handleError` (`src/api/taxApiClient.js:97-141`), which classifies `ECONNREFUSED` / `ECONNABORTED` / `ENOTFOUND` / server-error-with-body / no-response cases.
-  - Full field-level schema for the request/response body is owned externally and is not in this repo (`ARCHITECTURE.md` §9); sample bodies exist in `postman/nexgen-tax-api.postman_collection.json`.
+**Tax calculation - v1 (frozen, production default):**
+- Service: Magento STCCalcV3 Tax API, an Azure Function App (documented example host `syn-magento.azurewebsites.net`, per `README.md`).
+- Client: `src/api/taxApiClient.js` (class `TaxApiClient`), using `axios`.
+- Method: **HTTP `GET` with a JSON body** (`axios({ method: 'GET', data: requestBody, ... })`, `src/api/taxApiClient.js:36-48`). Unusual but deliberate — `CLAUDE.md` explicitly warns not to "fix" this to `POST` without coordinating with the API team.
+- Auth: static API key as a URL query parameter, `?code=<API_CODE>` (Azure Function key-style auth). Appended in `Config.getEndpointUrl()` (`src/config/index.js:75-89`).
+- Endpoints, resolved by operation in `Config.getEndpointUrl()`:
+  - `get_tax` / `post_tax` -> `${BASE_URL}STCCalcV3?code=${API_CODE}`, or `${BASE_URL}STCCalcV3_TEST?code=${API_CODE}` when `TEST_MODE=true`.
+  - `cancel_tax` -> `${BASE_URL}CancelTransaction`, unmodified — the only v1 operation whose URL does **not** carry `?code=`, and the only one unaffected by `TEST_MODE` (there is no `CancelTransaction_TEST` branch).
+- Timeout: 30000 ms (`this.timeout` in `TaxApiClient` constructor).
+- Response handling: `validateStatus: status < 500` lets 4xx through for manual handling; `_handleResponse` throws on `status >= 400`; on success returns `response.data` untransformed, later written verbatim to `RESPONSE_<file>.json`.
+- Credential exposure (known, deliberately unfixed): `TaxApiClient.makeRequest` (`src/api/taxApiClient.js:32`) does `console.log` of the full request URL, which for `get_tax`/`post_tax` includes `?code=<API_CODE>` in clear text on stdout. On an HTTP error, the same URL (with code) also reaches the winston error log file via `this.logger.error(...)`. Tracked as `DEBT-04` in `.planning/REQUIREMENTS.md`; not fixed in this milestone because `COMP-01` requires v1's observable behavior — including its stdout — to stay byte-for-byte identical during the migration.
+- Frozen: zero changes to this file during Phase 1 of the v2 migration. `tests/v1Freeze.wire.test.js` and `tests/v1Freeze.messages.test.js` assert its HTTP method, resolved URL, auth mechanism, and error message text don't drift.
 
-**Tax calculation — planned migration, not yet implemented:**
-- Synexus Compute API v2 (`compute.synexustax.com`, staging `compute.staging.synexustax.com`). This is the target of the current branch, `feat/synexus-v2-migration`. As of this analysis it is **reference-only**: no file under `src/` or `index.js` mentions "synexus"; the only repo references are two untracked Postman artifacts, `postman/synexus-v2-api.postman_collection.json` and `postman/synexus-staging.postman_environment.json`.
-  - SDK/Client: none yet.
-  - Auth: `Authorization: Bearer <synexus_api_key>` (current collection uses env var `synexus_api_key`, empty/unset in the checked-in Postman environment — no secret present). Environment boundary is enforced by key prefix: `syntax_test_` only works against staging, `syntax_live_` only against production; crossing them returns `401 invalid_key`. Keys are a fixed 76 characters (12-char prefix + 64 hex chars). Post-release, prefixes are renamed to `synexus_test_` / `synexus_live_`.
-  - Entity header: `X-Syntax-Entity` today; the collection has `X-Synexus-Entity` already present but disabled, to be swapped in on release day as a **hard cutover** (old header name stops being accepted, not a gradual deprecation).
-  - Endpoints documented in the collection:
-    - `GET /health` — liveness check, no entity header required.
-    - `GET /api/v1/entities` — discovers valid entity codes for `X-Syntax-Entity` / `X-Synexus-Entity`; also does not require the entity header.
-    - `POST /api/v1/tax_calculations` — the calculation call itself. Note: method changes from `GET` (current API) to `POST` (Synexus v2). The collection flags an unresolved discrepancy between source docs: the migration guide PDF says the path should be `/api/v1/tax_calculations/calculate`, but the API reference PDF's curl example (used as the collection's source of truth) omits `/calculate`; needs confirmation with Synexus before real integration work starts.
-  - Contract changes vs. the current integration, as documented in the Postman collection description (sourced from `data/API_REFERENCE.pdf` and `data/Cambios_MIGRATION_GUIDE_v2.pdf` — both gitignored under `data/`, not read directly for this analysis):
-    - Every `cart[]` line item must include a non-empty `tax_code`; missing/blank triggers `422 tax_code_missing`. Three reserved codes are always accepted without prior mapping: `TPP`, `SHIPPING`, `HANDLING`. An unmapped code is not an error — it returns `200`, bills the line as `TPP`, and adds a `tax_code_unmapped` warning.
-    - Monetary amounts and rates are returned as decimal strings (e.g. `"20.50"`), not floats/numbers — must be parsed with a decimal-safe method, never `parseFloat`.
-    - Inside `exemption.mapping`, the field previously called `client_category` is renamed to `tax_code`.
-    - Response always includes a `warnings[]` array (possibly empty) and a `request_id`, which Synexus requires for support requests.
-  - Additional source docs referenced but not present as Postman requests: `data/Cambios_PARTNER_API_CHANGES_CHECKLIST.pdf`, `data/ONBOARDING_GUIDE.pdf` (entity code table for Sage 300 is said to live in the Onboarding Guide, not the API Reference).
-  - Impact when implemented: will require changes to `Config.getEndpointUrl` (new host/paths, `POST` instead of `GET`), `TaxApiClient` (Bearer header, entity header, no more `?code=`), and likely `TaxValidator`/request shape (new field names like `tax_code`, `invoice_id`, `to_state`/`to_zip` vs. current `FromAddress1`/`ToAddress1`-style fields).
+**Tax calculation - v2 (Synexus Compute, opt-in, `get_tax` only so far):**
+- Service: Synexus Compute — a rebrand of a prior "Syntax" product (old `syntax_*` key prefixes and an `X-Syntax-Entity` header are no longer valid; both appear only as superseded reference points in `postman/synexus-v2-api.postman_collection.json` and in code comments explaining the new names). Hosts: `compute.staging.synexustax.com` (staging), `compute.synexustax.com` (production).
+- Client: `src/api/synexusApiClient.js` (class `SynexusApiClient`), using `axios`, `POST`.
+- Request builder: `src/api/synexusRequestBuilder.js` (class `SynexusRequestBuilder`) - owns three "intent" fields nexgen injects on top of the ERP's file, and **never** inherits them from the input file: `transaction_type`, `committed`, `request_id`. `getIntentFor('get_tax')` returns `{ transaction_type: 'sales_estimate', committed: false }` — `sales_estimate` specifically, not the provider's own default (`sales_invoice`), because `committed: false` alone does not suppress server-side persistence of an invoice snapshot (per the provider's field reference, described in `.planning/PROJECT.md`). `post_tax`/`cancel_tax` have no intent mapping yet and throw (`OPER-05`) — Phase 2 work.
+- Config: `src/config/synexusConfig.js` (class `SynexusConfig`, exported as a class — see `STACK.md`). Validates at construction, before any request is possible:
+  - Required vars present: `SYNEXUS_BASE_URL`, `SYNEXUS_API_KEY` (`_validateRequiredEnvVars`).
+  - `SYNEXUS_BASE_URL` shape: must parse as a URL, must be `https:` only, must be host-only — no path, query, fragment, or embedded credentials (`_getConfiguredUrl`, `src/config/synexusConfig.js:117-167`). A URL with leftovers is rejected with a message naming exactly what to remove; embedded credentials are masked before being echoed in that message.
+  - Key-prefix-to-host correspondence (`_validateKeyHostMatch`, `SAFE-03`): `synexus_test_*` keys are only valid against the staging host, `synexus_live_*` keys only against production. A mismatch — or an unrecognized prefix — throws before any network call.
+- Calculation endpoint: `SynexusConfig.getCalculationUrl()` = `${origin}/api/v1/tax_calculations` (`calculationPath` is a fixed literal on top of the validated origin). The provider also documents an equivalent alias `/tax_calculations/calculate` (per `.planning/PROJECT.md` Context notes); nexgen always uses the canonical, non-alias path.
+- Auth: `Authorization: Bearer <SYNEXUS_API_KEY>` header — never in the URL — plus an `X-Synexus-Entity: <entityCode>` header for multi-entity routing (`this.entityHeaderName` in `SynexusApiClient`, kept as an instance property specifically so a future rebrand only touches one line).
+- Entity resolution precedence (`SynexusConfig.resolveEntityCode`, `CFG-01`): `--entity=<code>` CLI flag, then `SYNEXUS_ENTITY` env var, then the `entity_id` field of the input JSON body — checked for truthiness, not just `!== undefined`, because the ERP's real extraction ships `"entity_id": ""`. If none of the three resolve, the run aborts (`CFG-02`) naming all three paths.
+- Idempotency: every v2 request carries a fresh `request_id` — a UUID v4 built from `crypto.randomBytes(16)` in `SynexusRequestBuilder._generateRequestId()` (not `crypto.randomUUID()` — see `STACK.md` Runtime notes). The provider caches responses by `request_id` for 5 minutes server-side (per `.planning/PROJECT.md`); this matters for a future timeout-retry (Phase 2 scope, not yet implemented).
+- Guard against v1 files under the v2 selector: `TaxValidator.validateV2IntentFields` (`src/validators/taxValidator.js:68-112`) rejects a body that carries `Committed` (capital C — v1's field), or a `transaction_type`/`committed` that contradicts the resolved operation's intent, or an inbound `request_id` (which would break the idempotency guarantee above).
+- Credential hygiene in error paths: `SynexusApiClient._handleError` (`src/api/synexusApiClient.js:107-166`) deliberately reads only `error.code`, `error.message`, `error.response.status`, and `error.response.data` — the surrounding comment warns never to serialize `error.config`, `error.request`, or the error object whole, because axios embeds the full outgoing request (headers included, i.e. the bearer key) there.
+- Startup profile line (`CONN-05`): `SynexusConfig.printProfile(entityCode)` prints one line — contract, host, entity, masked key (prefix + last 4 chars, ASCII `...`, never the raw value) — before any v2 request is made.
+- Timeout: 30000 ms, an independent constant in `SynexusApiClient` (not shared with `TaxApiClient`).
+- Response handling: same shape as v1 — `validateStatus: status < 500`, throw on `status >= 400`, return `response.data` untransformed.
+- Reference material: no OpenAPI/Swagger exists for this API (confirmed with the provider per `.planning/PROJECT.md`). The provider publishes 4 PDFs (out of repo, in `data/`, gitignored) as the only spec, documenting 45 request fields at the root level (only `invoice_id`, `customer_id`, `to_state`, `to_zip` required). Within this repo, `postman/synexus-v2-api.postman_collection.json` documents `GET /health`, `GET /api/v1/entities` (entity code discovery), and `POST /api/v1/tax_calculations`; `postman/synexus-staging.postman_environment.json` holds the matching Postman variables (`synexus_base_url`, `synexus_api_key`, `synexus_entity`). The `postman/` directory is untracked in git as of this analysis (`git status`: `?? postman/`).
+- Implemented scope: only `get_tax`. `post_tax` and `cancel_tax` invoked with `--api-version=v2` throw in `SynexusRequestBuilder.getIntentFor` before any request is built — explicitly Phase 2.
+
+## Contract Selector
+
+Both integrations above are reachable from every invocation; a selector picks exactly one per run:
+
+- `TAX_API_VERSION` env var, read via `Config.getApiVersion()` (`src/config/index.js:64-68`) — strict `=== 'v2'`; anything else (absent, empty, misspelled) resolves to `v1`.
+- `--api-version=<v1|v2>` CLI flag, read via `TaxCommandHandler.resolveApiVersion()` (`src/cli/taxCommandHandler.js:51-68`, static) — overrides the env var for a single invocation; any other value throws instead of silently choosing v1.
+- Resolved once in `index.js:59`, before the DI graph is built. Under v1, `SynexusConfig`/`SynexusApiClient` are never constructed (`index.js:60-65`, both stay `null`) — so a server with no `SYNEXUS_*` variables set is completely unaffected by v2's existence. `TaxCommandHandler._executeV2` also carries its own defense-in-depth guard (`if (!this.synexusApiClient) throw ...`) against incomplete wiring.
+- The ERP wrapper's real invocation (`node index.js get_tax <path>`, no flags) always takes the v1 path unless `TAX_API_VERSION=v2` is set server-side — this is `COMP-01`: production behavior is unchanged unless someone deliberately flips the switch.
 
 ## Data Storage
 
 **Databases:**
-- None. No ORM, no DB driver/client dependency in `package.json`, no connection-string env vars anywhere in the codebase or docs.
+- None. No database of any kind is used or configured.
 
 **File Storage:**
-- Local filesystem only, always accessed through `src/storage/fileManager.js` (project convention: never `fs` directly from other layers).
-  - Input: an arbitrary JSON transaction file, path supplied as the second CLI argument, read via `FileManager.readJsonFile` (`src/storage/fileManager.js:34-53`).
-  - Output: `OUTPUT_DIR/RESPONSE_<original_basename>.json`, written via `FileManager.writeJsonFile` (`src/storage/fileManager.js:126-137`) and named via `getResponseFileName` (`src/storage/fileManager.js:163-166`). Overwrites on every run against the same input filename — no timestamp, no versioning (`docs/MEMORY.md` D7).
-  - Logs: `logs/log_<YYYY-MM-DD>.log`, directory resolved by `Config.getLogDir()` (`src/config/index.js:85-87`), created on demand by `Logger._ensureLogDir` (`src/infrastructure/logger.js:23-27`).
+- Local filesystem only, via `src/storage/fileManager.js` (class `FileManager`) — the only place in the codebase that imports `fs` (convention per `CLAUDE.md`).
+- Input: `FileManager.readJsonFile(filePath)` reads and `JSON.parse`s the ERP-produced transaction file — same input contract for both v1 and v2 (v2's body validation happens afterward, in `TaxCommandHandler._executeV2`, not in `FileManager`).
+- Output: `FileManager.writeJsonFile` writes the (untransformed) API response to `${OUTPUT_DIR}/RESPONSE_<original_filename>.json` via `FileManager.getResponseFileName` — identical mechanism for v1 and v2 responses, no version marker in the filename. `OUTPUT_DIR` is created if missing (`FileManager.ensureDirectory`).
+- This file-drop contract is deliberate and explicitly preserved across the v1/v2 migration (per `.planning/PROJECT.md`: "dejemos la version dos funcionando igual que la uno").
 
 **Caching:**
-- None.
+- None inside nexgen. The v2 provider caches responses server-side by `request_id` for 5 minutes (external behavior, not implemented or observable in this codebase).
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- None for the CLI itself — this is a machine-invoked tool (spawned by the Sage 300 ERP or its PowerShell/.bat wrapper per `RUNBOOK.md` §1), with no user login, session, or identity layer of its own.
-- Outbound API auth only: Azure Function key in the query string (current integration, `API_CODE`) versus Bearer token + entity header (planned Synexus v2 integration, see above). No JWT, no OAuth flow, no API-key-in-header pattern in the current code.
+- None — nexgen has no end users and no login. It is an unattended CLI invoked once per transaction by an ERP wrapper script.
+- Per-integration credential (not a shared identity system):
+  - v1: static API key via URL query parameter `?code=<API_CODE>` (Azure Function key auth). See the "credential exposure" note under v1 above — this is a known, deliberately-unfixed gap (`DEBT-04`).
+  - v2: bearer token via `Authorization: Bearer <SYNEXUS_API_KEY>` header, with startup-time validation that the key's prefix matches the configured host (`SAFE-03`), and masking everywhere the key is echoed (`CFG-05`).
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None. No Sentry/Bugsnag/Rollbar or similar dependency.
+- None. No Sentry/Bugsnag/Datadog or equivalent APM/error-tracking service integrated.
 
 **Logs:**
-- `winston`, configured for `error` level only, single `File` transport writing to `logs/log_<YYYY-MM-DD>.log` (`src/infrastructure/logger.js:33-51`). The log filename date is computed once at `Logger` construction — a long-lived process spanning midnight keeps writing to the previous day's file (`CLAUDE.md` gotcha #6).
-- `logger.info` / `logger.warn` / `logger.debug` exist on the `Logger` class but are no-ops at the file transport because the underlying winston logger level is hard-set to `error`.
-- Real-time trace output goes to `console.log` (stdout) / `console.error` (stderr) throughout `src/`; this is not persisted unless the invoking wrapper redirects it (`RUNBOOK.md` documents `> stdout.log 2>&1` as the pattern to capture it).
+- `src/infrastructure/logger.js` (class `Logger`), backed by `winston` — see `STACK.md` for dependency detail. Level fixed at `error`; one file per day, `logs/log_YYYY-MM-DD.log`. Both `TaxApiClient` and `SynexusApiClient` log HTTP failures here via `this.logger.error(...)`, in addition to `console.error` for interactive/console visibility.
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- None — not deployed as a network service. Distributed as a folder copied to the ERP host and invoked as a local child process; production location documented as `C:\nexgen` (`RUNBOOK.md` §1).
+- None for nexgen itself — see `STACK.md` "Platform Requirements" (runs on-prem as a CLI alongside the ERP, not as a deployed/hosted service).
 
 **CI Pipeline:**
-- None detected. No `.github/workflows`, no other CI/CD config files in the repo.
-
-**Deployment mechanism:**
-- Manual: copy the project folder to the target Windows machine, ensure `.env` is present with the four vars, invoke via `wrapper-nexgen.ps1` (or the `.bat` alternative) from a Sage 300 ERP job or Windows Task Scheduler. `RUNBOOK.md` §1 has the full wrapper script and usage example.
+- None. No `.github/workflows/`, no other CI config file found anywhere in the repo.
 
 ## Environment Configuration
 
-**Required env vars:**
-- `BASE_URL` — trailing-slash base URL of the Azure Functions host.
-- `API_CODE` — Azure Function key for `STCCalcV3` / `STCCalcV3_TEST` (not used for `CancelTransaction`).
-- `OUTPUT_DIR` — directory where `RESPONSE_*.json` files are written (created automatically if missing).
+**Required always (v1 - `Config` constructor throws if missing, `src/config/index.js:19-26`):**
+- `BASE_URL`, `API_CODE`, `OUTPUT_DIR`
 
-**Optional env vars:**
-- `TEST_MODE` — `true` routes `get_tax`/`post_tax` to `STCCalcV3_TEST`; any other value (including unset) is production. Does not affect `cancel_tax`.
+**Optional (v1):**
+- `TEST_MODE` (default `false`; `true` routes `get_tax`/`post_tax` to `STCCalcV3_TEST` instead of `STCCalcV3` — does not affect `cancel_tax`)
+- `TAX_API_VERSION` (default resolves to `v1` — see Contract Selector above)
+
+**Required only when the v2 contract is selected (`SynexusConfig` constructor throws if missing/malformed, `src/config/synexusConfig.js:49-59`):**
+- `SYNEXUS_BASE_URL` (https + host only), `SYNEXUS_API_KEY` (prefix must match the host)
+
+**Optional (v2):**
+- `SYNEXUS_ENTITY` (one of three ways to supply the entity code — see precedence under v2 above)
+
+**Per-run CLI overrides (any position, per `TaxCommandHandler.knownFlags`):**
+- `--api-version=<v1|v2>`, `--entity=<code>`
 
 **Secrets location:**
-- `.env` at the repo root, gitignored (`.gitignore` lists `.env` and its variants explicitly).
-- A second, undotted `env` file also exists at the repo root (untracked). A `.gitignore` comment notes it "trae API_CODE" (carries `API_CODE`) and appears to be a stray duplicate from a September 9 2026 meeting — it is not referenced by any code path (`src/config/index.js:3` loads only `.env`). Existence noted here only; contents were not read as part of this analysis.
-- Full env var table with descriptions: `HANDOFF.md` §9.
+- `.env` at repo root (gitignored), loaded by `src/config/index.js:3`.
+- A second, undotted `env` file also exists at the repo root — also gitignored, and separately flagged in `.gitignore` as containing `API_CODE`. Noted here by existence only; not read by this mapping pass (forbidden-file policy).
+- Neither file is required to run the test suite (see "Test Isolation" below).
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None. The CLI has no HTTP listener/server of any kind — it is purely a short-lived process invoked with CLI args, one operation per invocation.
+- None. nexgen never listens for inbound HTTP of any kind — it is a CLI, not a service.
 
 **Outgoing:**
-- None beyond the synchronous tax-API request/response call itself. No fire-and-forget notifications, no separate webhook dispatch. (`docs/MEMORY.md` D4 notes a `node-notifier` desktop-notification dependency existed briefly in project history and was removed — not part of the current stack.)
+- None in the webhook/callback sense (no fire-and-forget notification to a third party). The closest analog is the file-drop handoff to the ERP: nexgen writes `RESPONSE_<name>.json` into `OUTPUT_DIR`, and the ERP wrapper is expected to read that path afterward. This is a filesystem contract, not a network callback — see "Data Storage" above.
+
+## Test Isolation from External Integrations
+
+`tests/setup.js` runs as a Jest `setupFiles` entry — before any test file or any `src/` module loads — and enforces that the entire 9-suite / 242-case run touches neither integration for real:
+- Hardcodes fictitious values for all six v1+v2 env vars (`BASE_URL`, `API_CODE`, `OUTPUT_DIR`, `TEST_MODE`, `SYNEXUS_BASE_URL`, `SYNEXUS_API_KEY`), using the RFC 2606 reserved-invalid TLD `.invalid` for both URLs so they can never resolve on a real network.
+- Deliberately leaves `SYNEXUS_ENTITY` and `TAX_API_VERSION` **unset** (`delete process.env...`) so individual tests can control precedence/default behavior themselves.
+- Monkey-patches `dotenv.config` to a no-op (`dotenv.config = () => ({ parsed: {} })`) **before** `src/config` ever requires `dotenv`, so a real `.env` present on the machine running the suite can never leak in and change test behavior between a developer laptop and the company server.
+- Replaces `http.request`/`http.get`/`https.request`/`https.get` (all four, both modules) with a function that throws — since axios routes all Node HTTP traffic through these, any accidental real call from either `TaxApiClient` or `SynexusApiClient` fails the test immediately instead of reaching a live endpoint.
+- `tests/setup.test.js` exists specifically to assert this neutralization itself hasn't regressed.
 
 ---
 
-*Integration audit: 2026-09-10*
+*Integration audit: 2026-09-11*

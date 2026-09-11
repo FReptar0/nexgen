@@ -1,276 +1,229 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-09-10
+**Analysis Date:** 2026-09-11
 
 ## Directory Layout
 
 ```
 nexgen/
-├── index.js                    # Entry point — DI composition root, runs one command
-├── package.json                # 3 runtime deps, no build step, no real test script
+├── index.js                     # Entry point — builds the DI graph, resolves contract, runs one command
+├── package.json                 # Metadata; 3 runtime deps (axios, dotenv, winston) + jest devDependency
 ├── package-lock.json
+├── jest.config.js               # testEnvironment: node, setupFiles: tests/setup.js
+├── .env                         # Environment vars (gitignored) — v1 always required, v2 required only under v2
+├── env                          # Stray duplicate without the dot (gitignored) — contains API_CODE; never read
 ├── .gitignore
-├── CLAUDE.md                   # Persistent instructions for Claude Code sessions
-├── ARCHITECTURE.md             # Repo-root engineer-facing architecture doc (predates GSD)
-├── HANDOFF.md                  # Owner-to-owner transfer brief (Spanish)
-├── RUNBOOK.md                  # Operational procedures (Spanish)
-├── README.md                   # Setup + usage
-├── env                         # Stray file at repo root — see "Key File Locations"
+├── README.md                    # User-facing usage doc (English)
+├── CLAUDE.md                    # Persistent instructions for Claude Code sessions
+├── ARCHITECTURE.md              # Hand-maintained per-layer map (English, root-level — distinct from this directory's ARCHITECTURE.md)
+├── HANDOFF.md                   # Owner-to-owner brief (Spanish)
+├── RUNBOOK.md                   # Operational procedures (Spanish)
 ├── src/
 │   ├── cli/
-│   │   └── taxCommandHandler.js       # Argv parsing, command lifecycle orchestration
+│   │   └── taxCommandHandler.js        # CLI layer — argv parsing, contract branch, orchestration
 │   ├── validators/
-│   │   └── taxValidator.js            # Committed-field rules, string sanitization
+│   │   └── taxValidator.js             # Validation layer — v1 Committed rules + v2 intent rules + sanitization
 │   ├── api/
-│   │   └── taxApiClient.js            # axios HTTP client (STCCalcV3 / CancelTransaction)
+│   │   ├── taxApiClient.js             # v1 HTTP client — FROZEN, do not edit beyond adding a wrapper method
+│   │   ├── synexusApiClient.js         # v2 HTTP client
+│   │   └── synexusRequestBuilder.js    # v2 request body builder — no v1 equivalent
 │   ├── storage/
-│   │   └── fileManager.js             # JSON file I/O, RESPONSE_ naming
+│   │   └── fileManager.js              # Storage layer — JSON I/O, shared by both contracts
 │   ├── infrastructure/
-│   │   └── logger.js                  # winston, error-only, daily file rotation
+│   │   └── logger.js                   # winston error-only logger, shared by both contracts
 │   └── config/
-│       └── index.js                   # dotenv load + validation, endpoint resolution (singleton)
+│       ├── index.js                    # v1 Config — singleton, exported as an instance
+│       └── synexusConfig.js            # v2 SynexusConfig — exported as a class, built conditionally
+├── tests/
+│   ├── setup.js                        # Jest setupFiles — fake env vars, dotenv neutralization, network block
+│   ├── setup.test.js                   # Verifies setup.js's own neutralization holds
+│   ├── helpers/
+│   │   └── fakes.js                    # Shared test doubles: createFakeLogger, createFakeConfig, createAxiosResponse
+│   ├── argumentParsing.test.js         # parseArguments / resolveApiVersion
+│   ├── synexusConfig.test.js
+│   ├── synexusRequestBuilder.test.js
+│   ├── synexusApiClient.test.js
+│   ├── v1Freeze.wire.test.js           # Freezes v1's exact HTTP wire shape (method, URL, timeout, status cut)
+│   ├── v1Freeze.messages.test.js       # Freezes v1's exact error message strings
+│   ├── v2IntentValidation.test.js      # validateV2IntentFields cases
+│   └── v2QuoteEndToEnd.test.js         # Full get_tax v2 lifecycle, no network
+├── postman/
+│   ├── nexgen-tax-api.postman_collection.json      # v1 (Azure) collection — informational only
+│   ├── nexgen-test.postman_environment.json
+│   ├── synexus-v2-api.postman_collection.json      # v2 (Synexus) collection — executable contract reference
+│   └── synexus-staging.postman_environment.json
 ├── docs/
-│   └── MEMORY.md               # Historical decisions (D1-D9), conventions (C1-C6) — Spanish
+│   └── MEMORY.md                       # Historical decisions and conventions (Spanish)
+├── logs/                                # winston output: log_<YYYY-MM-DD>.log (gitignored, generated)
+├── data/                                # Provider PDFs + meeting notes (gitignored; never cite contents in .planning/)
 ├── .claude/
-│   ├── agents/                 # Custom subagents (nexgen-explorer, tax-validator-helper)
-│   ├── commands/                # Slash commands (/tax-quote, /tax-commit, /tax-cancel)
-│   └── settings.json             # Tool permission allow/deny list
-├── .planning/
-│   └── codebase/                # GSD codebase maps — this document's home
-├── postman/                    # Untracked — manual API-testing collections/environments
-├── data/                       # Local-only (git-excluded) — raw meeting notes, reference PDFs
-├── node_modules/               # npm-installed dependencies (gitignored)
-└── logs/                       # Runtime-generated, gitignored — absent until first run
+│   ├── agents/
+│   │   ├── nexgen-explorer.md          # Read-only tracer — both contracts, file:line citations
+│   │   └── tax-validator-helper.md     # Scoped editor for src/validators/taxValidator.js only
+│   ├── commands/
+│   │   ├── tax-quote.md                # /tax-quote → get_tax
+│   │   ├── tax-commit.md               # /tax-commit → post_tax
+│   │   └── tax-cancel.md               # /tax-cancel → cancel_tax
+│   └── settings.json
+└── .planning/                           # GSD technical plan (see root CLAUDE.md — owns "what" and "why")
+    ├── PROJECT.md
+    ├── ROADMAP.md
+    ├── REQUIREMENTS.md
+    ├── STATE.md
+    ├── config.json
+    ├── codebase/                       # This directory — regenerated by /gsd-map-codebase
+    └── phases/
+        └── 01-camino-v2-de-punta-a-punta-para-una-cotizaci-n/
+            ├── 01-CONTEXT.md
+            ├── 01-PATTERNS.md
+            ├── 01-0{1..4}-PLAN.md / -SUMMARY.md
+            ├── 01-REVIEW.md
+            ├── 01-VERIFICATION.md
+            └── deferred-items.md
 ```
-
-Confirmed via `git ls-files` (tracked set): `.claude/**`, `.gitignore`,
-`ARCHITECTURE.md`, `CLAUDE.md`, `HANDOFF.md`, `README.md`, `RUNBOOK.md`,
-`docs/MEMORY.md`, `index.js`, `package.json`, `package-lock.json`, and
-all six files under `src/`. Everything else listed above (`postman/`,
-`env`, `data/`, `node_modules/`, `logs/`, `.planning/`) is untracked,
-gitignored, or excluded via `.git/info/exclude`.
 
 ## Directory Purposes
 
 **`src/cli/`:**
-- Purpose: user-facing command orchestration layer
-- Contains: one class (`TaxCommandHandler`) — argv parsing, step
-  sequencing, response persistence, centralized error logging
-- Key files: `src/cli/taxCommandHandler.js`
+- Purpose: user-facing command orchestration — the only layer that knows both API contracts exist
+- Contains: `taxCommandHandler.js` (single file)
+- Key files: `src/cli/taxCommandHandler.js` — highest change-risk file in the repo per `.planning/phases/01-.../01-PATTERNS.md` (the ERP wrapper depends on its positional argv behavior not changing)
 
 **`src/validators/`:**
-- Purpose: business-rule enforcement before any network call
-- Contains: one class (`TaxValidator`) — operation whitelist,
-  `Committed` semantics, recursive string sanitization
+- Purpose: business-rule enforcement before any HTTP call
+- Contains: `taxValidator.js` (single file, one class, methods for both contracts)
 - Key files: `src/validators/taxValidator.js`
 
 **`src/api/`:**
-- Purpose: the only place HTTP is spoken in this codebase
-- Contains: one class (`TaxApiClient`) — axios request construction,
-  response/error classification
-- Key files: `src/api/taxApiClient.js`
+- Purpose: HTTP transport — the only place `axios` is imported
+- Contains: one client per contract (`taxApiClient.js` v1, `synexusApiClient.js` v2) plus the v2-only body builder (`synexusRequestBuilder.js`)
+- Key files: `src/api/taxApiClient.js` (frozen), `src/api/synexusApiClient.js`, `src/api/synexusRequestBuilder.js`
 
 **`src/storage/`:**
-- Purpose: the only place the filesystem is touched in this codebase
-- Contains: one class (`FileManager`) — JSON read/write, directory
-  creation, response filename convention
-- Key files: `src/storage/fileManager.js`
+- Purpose: every filesystem read/write in the application
+- Contains: `fileManager.js` (single file)
+- Key files: `src/storage/fileManager.js` — `RESPONSE_` prefix convention lives here (`getResponseFileName`)
 
 **`src/infrastructure/`:**
-- Purpose: cross-cutting logging service
-- Contains: one class (`Logger`) wrapping a single `winston` instance
+- Purpose: cross-cutting services not specific to any business layer
+- Contains: `logger.js` (winston wrapper) only
 - Key files: `src/infrastructure/logger.js`
 
 **`src/config/`:**
-- Purpose: centralize environment variable access and endpoint URL
-  resolution
-- Contains: one class (`Config`), exported pre-constructed as a
-  singleton
-- Key files: `src/config/index.js`
+- Purpose: environment variable loading, validation, and derived values (URLs, selectors)
+- Contains: `index.js` (v1 singleton, also the only file that calls `dotenv.config()`), `synexusConfig.js` (v2 class)
+- Key files: `src/config/index.js`, `src/config/synexusConfig.js`
 
-**`.claude/`:**
-- Purpose: Claude Code project configuration — committed and versioned
-- Contains: two custom subagents (read-only tracer, validator-editing
-  helper) and three slash commands (`tax-quote`, `tax-commit`,
-  `tax-cancel`), plus the permission `settings.json`
-- Key files: `.claude/agents/nexgen-explorer.md`,
-  `.claude/agents/tax-validator-helper.md`,
-  `.claude/commands/tax-quote.md`, `.claude/commands/tax-commit.md`,
-  `.claude/commands/tax-cancel.md`, `.claude/settings.json`
+**`tests/`:**
+- Purpose: Jest suite — no `.env`, no credentials, no network access required
+- Contains: one `.test.js` file per subject/aspect, a shared `helpers/` directory, and `setup.js` (mandatory isolation, wired via `jest.config.js`'s `setupFiles`)
+- Key files: `tests/setup.js` (must run before anything requires `src/config`), `tests/helpers/fakes.js`
+
+**`postman/`:**
+- Purpose: executable API contract references — no OpenAPI/Swagger exists for either provider
+- Contains: two collection/environment pairs (v1 Azure, v2 Synexus)
+- Key files: `postman/synexus-v2-api.postman_collection.json` — ground truth used to build the v2 request shape and headers
 
 **`docs/`:**
-- Purpose: historical/decision record, separate from the operational
-  handoff docs at repo root
-- Contains: `MEMORY.md` only — decisions D1-D9 (layering, `TEST_MODE`,
-  sanitization, logger level, etc.) and conventions C1-C6
-- Key files: `docs/MEMORY.md`
+- Purpose: historical/narrative documentation, not the technical plan
+- Contains: `MEMORY.md` (Spanish — past decisions and conventions)
 
-**`.planning/codebase/`:**
-- Purpose: GSD-generated, machine-maintained codebase reference docs
-  consumed by `/gsd-plan-phase` and `/gsd-execute-phase`
-- Contains: this file and its sibling architecture/stack/etc. docs
-- Key files: `.planning/codebase/ARCHITECTURE.md`,
-  `.planning/codebase/STRUCTURE.md`
+**`.planning/`:**
+- Purpose: GSD's technical plan — requirements, roadmap, phase execution, this codebase map. Root `CLAUDE.md` designates this directory as the plan owner; other root docs describe code, not intent.
+- Contains: top-level plan docs, `codebase/` (this map), `phases/<NN-slug>/` per phase
 
 ## Key File Locations
 
 **Entry Points:**
-- `index.js`: process entry point; builds the DI graph, runs one
-  command, sole `process.exit(1)` boundary.
+- `index.js`: the only entry point — CLI invocation, DI composition root
 
 **Configuration:**
-- `src/config/index.js`: loads `.env` from the repo root
-  (`path.resolve(__dirname, '../../.env')`, line 3), validates
-  `BASE_URL`/`API_CODE`/`OUTPUT_DIR`, resolves endpoint URLs, exported
-  as a singleton.
-- `env` (repo root, **no leading dot**): present in the working tree,
-  but this filename does not match the `.env` path
-  `dotenv.config()` resolves in `src/config/index.js:3` — it is not
-  automatically loaded by `Config`. `.gitignore` documents it as a
-  stray file that carries `API_CODE` (comment: "apareció suelta...
-  reunión 9-sep-2026"). Existence noted only — contents were not read
-  (forbidden: contains a credential).
-- `.claude/settings.json`: tool permission allow/deny list for Claude
-  Code sessions in this repo (denies reading `.env*`, `logs/**`,
-  `results/**`, `test-files/**`, among other destructive-command
-  guards).
+- `.env` (repo root, gitignored): v1 vars (`BASE_URL`, `API_CODE`, `OUTPUT_DIR`, `TEST_MODE`) always required; `TAX_API_VERSION` selects the contract; v2 vars (`SYNEXUS_BASE_URL`, `SYNEXUS_API_KEY`, `SYNEXUS_ENTITY`) required only when the contract resolves to v2
+- `src/config/index.js`: v1 config singleton + `getApiVersion()` selector + `getEndpointUrl()`
+- `src/config/synexusConfig.js`: v2 config class — key↔host validation, `getCalculationUrl()`, `resolveEntityCode()`
+- `jest.config.js`: test runner configuration
 
 **Core Logic:**
-- `src/cli/taxCommandHandler.js`: command lifecycle orchestration.
-- `src/validators/taxValidator.js`: business rule enforcement.
-- `src/api/taxApiClient.js`: external HTTP integration.
-- `src/storage/fileManager.js`: filesystem I/O.
+- `src/cli/taxCommandHandler.js`: orchestration + contract branch (`execute()`, `_executeV2()`)
+- `src/validators/taxValidator.js`: both contracts' validation rules
+- `src/api/taxApiClient.js`, `src/api/synexusApiClient.js`, `src/api/synexusRequestBuilder.js`: HTTP + body construction
+- `src/storage/fileManager.js`: file I/O
 
 **Testing:**
-- None exist. No test files, no test directories, no test runner
-  configured. `package.json`'s `"test"` script is the npm default
-  placeholder (`echo "Error: no test specified" && exit 1`).
+- `tests/setup.js`: mandatory isolation (fake env vars, dotenv neutralization, HTTP/HTTPS block) — runs once via `jest.config.js`'s `setupFiles`, before any test file is evaluated
+- `tests/helpers/fakes.js`: shared doubles (`createFakeLogger`, `createFakeConfig`, `createAxiosResponse`)
 
 ## Naming Conventions
 
 **Files:**
-- Source files: English camelCase matching the class they export
-  (`taxApiClient.js` → `TaxApiClient`, `fileManager.js` →
-  `FileManager`, `taxCommandHandler.js` → `TaxCommandHandler`,
-  `taxValidator.js` → `TaxValidator`).
-- Module entry points use `index.js` (repo root and `src/config/`).
-- Response files: `RESPONSE_<original-basename>` — fixed prefix,
-  original extension preserved, no timestamp
-  (`FileManager.getResponseFileName`,
-  `src/storage/fileManager.js:163-166`).
-- Log files: `log_<YYYY-MM-DD>.log`
-  (`src/infrastructure/logger.js:44-47`).
+- `camelCase.js` for every `src/` implementation file, one class per file, filename matches the exported class name in camelCase (`taxCommandHandler.js` → `TaxCommandHandler`)
+- v2-only files/classes carry a `synexus`/`Synexus` prefix (`synexusApiClient.js`, `SynexusConfig`) — visually separates them from v1's `tax*`/`Tax*`/`STCCalcV3` naming without either namespace importing the other
 
 **Directories:**
-- One directory per architectural layer under `src/`, named as a
-  lowercase singular noun or acronym: `cli`, `api`, `storage`,
-  `infrastructure`, `config` — except `validators`, which is plural.
-- One file per layer today. Per `docs/MEMORY.md` C2: if a layer grows,
-  split it into submodules **inside its own folder** before creating a
-  new top-level layer.
+- Lowercase, one word per layer, matching the layer's role (`cli`, `validators`, `api`, `storage`, `infrastructure`, `config`) — no `utils`, `helpers`, `common`, or `shared` directory exists under `src/`
 
 **Classes:**
-- PascalCase, one class per file, matching the file's primary export:
-  `TaxCommandHandler`, `TaxValidator`, `TaxApiClient`, `FileManager`,
-  `Logger`, `Config`.
+- PascalCase, always matches the filename (`TaxCommandHandler` in `taxCommandHandler.js`, `SynexusRequestBuilder` in `synexusRequestBuilder.js`)
 
-**Methods and variables:**
-- English camelCase throughout: `getEndpointUrl`, `requestBody`,
-  `sanitizeStringFields`, `parseArguments`.
-- Private/internal methods are prefixed with `_` and marked `@private`
-  in JSDoc: `_handleResponse`, `_handleError`, `_saveResponse`,
-  `_ensureLogDir`, `_createLogger`, `_validateRequiredEnvVars`,
-  `_listSimilarFiles`, `_handleFileReadError`.
+**Test files:**
+- `<subject>.test.js`, co-located in `tests/` (not alongside `src/<layer>/`)
+- Compound names use a dot to scope one sub-aspect of a subject: `v1Freeze.wire.test.js` and `v1Freeze.messages.test.js` are both about "freezing v1" but split by *what* they freeze (wire shape vs. message strings) — follow this pattern for any future split, e.g. a hypothetical `v2Freeze.wire.test.js`
 
-**Language split (see `CLAUDE.md` and `docs/MEMORY.md` C1):**
-- Class/method/variable/file names: English.
-- JSDoc comments and user-facing error/log messages: Spanish.
+**Test helpers:**
+- `tests/helpers/` — one shared file (`fakes.js`) exporting factory functions (`createFakeX`), not classes or a test-only DI container
 
 ## Where to Add New Code
 
-**New tax operation (e.g., a 4th operation beyond get/post/cancel):**
-- `src/validators/taxValidator.js`: add to `validOperations`
-  (line 15) and, if applicable, a branch in `validateCommittedField`
-  (lines 38-55).
-- `src/config/index.js`: add a URL branch in `getEndpointUrl`
-  (lines 65-79).
-- `src/api/taxApiClient.js`: optionally add a thin wrapper method
-  alongside `getTax`/`postTax`/`cancelTax` (lines 148-168).
-- No changes needed in `index.js` or `TaxCommandHandler` — both are
-  already operation-agnostic.
-- Tests: none exist yet; no test directory convention is established
-  in this codebase (the repo-root `ARCHITECTURE.md` §10 proposes
-  `src/<layer>/__tests__/` but it is unused).
+**New v2 operation** (e.g., `post_tax`/`cancel_tax` under v2 — Phase 2 scope):
+- Add its intent mapping to `SynexusRequestBuilder.getIntentFor` (`src/api/synexusRequestBuilder.js:42-59`) — never add an `else` default branch
+- Add a wrapper method to `SynexusApiClient` if a dedicated method is wanted, following the `getTax` pattern (`src/api/synexusApiClient.js:175-177`)
+- Extend `TaxValidator.validateV2IntentFields` if the new operation needs different contradiction rules (`src/validators/taxValidator.js:68-112`)
+- Tests: new cases in `tests/v2IntentValidation.test.js`, and a new `tests/v2<Operation>EndToEnd.test.js` following `tests/v2QuoteEndToEnd.test.js`
 
-**New layer/module:**
-- Create a new directory under `src/`, named as a lowercase singular
-  noun for the responsibility it owns.
-- Add one file exporting one PascalCase class whose constructor
-  receives its collaborators (never `require`s a sibling layer
-  directly).
-- Wire its instantiation into `index.js`'s `main()`, in dependency
-  order — lowest-level collaborators first (`index.js:37-55`).
+**New v1 operation:**
+- In order (per root `CLAUDE.md`): `TaxValidator.validOperations` (`src/validators/taxValidator.js:15`) → `TaxValidator.validateCommittedField` if applicable → `Config.getEndpointUrl` (`src/config/index.js:75-89`)
+- Never edit `src/api/taxApiClient.js` beyond adding a thin wrapper method — it is frozen and regression-tested by `tests/v1Freeze.*.test.js`
 
-**Utilities:**
-- No shared `utils/` or `common/` folder exists. Each layer keeps its
-  own private helpers as `_`-prefixed methods on its own class rather
-  than extracting to a shared module. Follow this pattern rather than
-  introducing a new cross-layer utilities directory unless a helper is
-  demonstrably needed by more than one layer.
+**New shared utility:**
+- No `src/utils/` or equivalent exists. Every file exports exactly one class (`module.exports = ClassName`); the sole exception is the `Config` singleton (`module.exports = new Config()`). A new cross-cutting need becomes a private `_`-prefixed method on the class that needs it, not an assumed new top-level directory.
+
+**New test:**
+- `tests/<subject>.test.js`, using `tests/helpers/fakes.js` factories for `Logger`/`Config` doubles
+- Never `require('../index.js')` in a test — it calls `main()` on load and would trigger a real run
+- Never `require('../src/config')` without `tests/setup.js` already having run — the module throws at `require` time if `BASE_URL`/`API_CODE`/`OUTPUT_DIR` are missing, which is why isolation is wired as Jest's `setupFiles` rather than per-test setup
 
 ## Special Directories
 
-**`logs/`:**
-- Purpose: daily winston error-log files (`log_<date>.log`)
-- Generated: Yes — created on first run by `Logger._ensureLogDir`
-  (`src/infrastructure/logger.js:23-27`)
-- Committed: No (gitignored)
-- Currently absent from the working tree; created on demand
-
-**`postman/`:**
-- Purpose: manual API-testing collections/environments — one set for
-  the current Magento tax API (`nexgen-tax-api.postman_collection.json`,
-  `nexgen-test.postman_environment.json`) and one reference set for a
-  prospective "Synexus Compute API v2"
-  (`synexus-v2-api.postman_collection.json`,
-  `synexus-staging.postman_environment.json`), matching the current
-  branch name `feat/synexus-v2-migration`
-- Generated: No (hand-maintained exports)
-- Committed: No — currently untracked (`?? postman/` in git status)
-- Not referenced by any runtime code; `grep` across `src/` and
-  `index.js` found no "Synexus" references — the v2 integration is not
-  yet implemented, only scoped
-
 **`data/`:**
-- Purpose: raw meeting notes and reference PDFs (bitácora)
-- Generated: No
-- Committed: No — excluded via local `.git/info/exclude` (not
-  `.gitignore`), with the exclude file's own comment stating these
-  notes must never leave the team. Do not copy contents from this
-  directory into any file that will be committed.
+- Purpose: raw provider PDFs and meeting notes — reference material for the v2 migration
+- Generated: No (manually placed)
+- Committed: No — excluded via `.gitignore`; root `CLAUDE.md` states it contains client/colleague names and its contents must never be quoted inside `.planning/`
 
-**`.planning/codebase/`:**
-- Purpose: GSD-generated codebase reference docs, read by
-  `/gsd-plan-phase` and `/gsd-execute-phase`
-- Generated: Yes, by `/gsd-map-codebase`
+**`logs/`:**
+- Purpose: winston daily error log files (`log_<YYYY-MM-DD>.log`)
+- Generated: Yes, at runtime (`Logger._ensureLogDir`, `src/infrastructure/logger.js:23-27`)
+- Committed: No (`.gitignore`: `logs/`, `*.log`)
+
+**`.planning/`:**
+- Purpose: GSD technical plan (requirements, roadmap, phase execution, this codebase map)
+- Generated: Partially — `codebase/` is regenerated by `/gsd-map-codebase`; phase docs are produced by other GSD commands
 - Committed: Yes
 
-**`node_modules/`:**
-- Purpose: npm-installed dependencies (`axios`, `dotenv`, `winston`,
-  and their transitive deps)
-- Generated: Yes (`npm install`)
-- Committed: No (gitignored)
+**`.claude/`:**
+- Purpose: subagents (`agents/nexgen-explorer.md`, `agents/tax-validator-helper.md`) and slash commands (`commands/tax-quote.md`, `tax-commit.md`, `tax-cancel.md`)
+- Generated: No
+- Committed: Yes — root `CLAUDE.md` requires these be reviewed and updated whenever the code they reference changes (already done once, in Phase 1, per `.planning/STATE.md`'s decision log)
 
-**`test-files/` and `results/` (referenced, not present):**
-- Purpose: `.claude/commands/tax-quote.md`, `tax-commit.md`, and
-  `tax-cancel.md` all expect operator-provided fixtures under
-  `test-files/` and treat `results/` as gitignored output; both are
-  listed in `.gitignore` and in `.claude/settings.json`'s deny list
-- Generated: No (operator-provided)
+**`postman/`:**
+- Purpose: two executable API contract references (v1 Azure, v2 Synexus) — the v2 collection is the closest thing to a spec since no OpenAPI/Swagger exists for that provider
+- Generated: No (manually maintained)
+- Committed: Yes — environment files use `{{variable}}` placeholders, no embedded credentials
+
+**`node_modules/`, `coverage/`:**
+- Purpose: installed dependencies / Jest coverage output
+- Generated: Yes
 - Committed: No
-- Currently absent from the working tree (not found by directory
-  scan)
 
 ---
 
-*Structure analysis: 2026-09-10*
+*Structure analysis: 2026-09-11*
