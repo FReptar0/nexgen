@@ -76,7 +76,13 @@ Plans:
   4. Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que construye, sin salir a la red; la respuesta real de staging archivada en `data/` funciona como fixture de contrato de esas pruebas, y hay prueba que falla si la forma de la respuesta esperada se desvía de ella
   5. Los montos y tasas se escriben con los mismos dígitos que devolvió el proveedor, y hay prueba que falla si alguno pasa por conversión a punto flotante en cualquier punto del camino
   6. El archivo de salida conserva el nombre del archivo de entrada, el prefijo `RESPONSE_`, la numeración original y el directorio de salida, con el cuerpo escrito completo y sin transformar; los errores del contrato v2 se distinguen por su código estable y no por el texto del mensaje; y el identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida
-**Plans**: TBD
+**Plans**: 4 plans (02-01 … 02-04), en 4 waves secuenciales — comparten `synexusApiClient.js` y el manejador
+Plans:
+- [ ] 02-01-PLAN.md — `post_tax` bajo v2 (sales_invoice + committed true), fixture de contrato en `tests/fixtures/`, fidelidad numérica y contrato de archivos con el `FileManager` real, WR-03/WR-04
+- [ ] 02-02-PLAN.md — `cancel_tax` bajo v2: `POST /api/v1/invoices/cancel` con la proyección `{ invoice_id, customer_id }`, aborto antes de la red si falta uno, recorrido completo y contraste v1
+- [ ] 02-03-PLAN.md — `request_id` del proveedor registrado en toda corrida (SAFE-06) y clasificación de errores por código estable / por status en la cancelación (SAFE-05)
+- [ ] 02-04-PLAN.md — Un solo reintento en proceso con la misma llave, sólo cuando es seguro (SAFE-02), y documentación de comandos, agentes y README al día
+**Nota**: Todos los criterios de esta fase se comprueban sin red y sin credenciales; la respuesta real de staging del 9-sep entra al repositorio como fixture de contrato. `SAFE-01` queda acotado a las peticiones de cálculo: la cancelación no lleva `request_id` porque el contrato no lo documenta para ese endpoint y la operación es idempotente por naturaleza (decisión en `02-CONTEXT.md`).
 
 ### Phase 3: Verificación contra staging y corte documentado
 **Goal**: El área de ERP puede validar las tres operaciones contra staging siguiendo un procedimiento escrito, y queda con una lista de verificación para decidir y ejecutar el corte a producción
@@ -98,7 +104,7 @@ Las fases se ejecutan en orden numérico: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Camino v2 de punta a punta para una cotización | 4/4 | Complete | 2026-09-11 |
-| 2. Confirmar, cancelar y devolver la respuesta íntegra | 0/TBD | Not started | - |
+| 2. Confirmar, cancelar y devolver la respuesta íntegra | 0/4 | Planned | - |
 | 3. Verificación contra staging y corte documentado | 0/TBD | Not started | - |
 
 ## Cobertura de requisitos
