@@ -55,7 +55,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. El código de entidad se resuelve por precedencia —argumento de línea de comandos, luego variable de entorno, luego campo del JSON—; si ninguna vía lo provee, o si falta cualquier otra variable requerida por el camino v2, la corrida aborta al arrancar con un mensaje en español que nombra qué falta y cómo proporcionarlo
   5. Abortan antes de emitir cualquier petición de red: una corrida cuyo prefijo de llave no corresponde al host configurado —con prueba que verifica ese rechazo—, un `Committed` invertido, una operación fuera de la lista y un campo de intención ausente
   6. `get_tax` produce un `POST` con cuerpo JSON contra la ruta de cálculo v2, con la llave en el header `Authorization: Bearer`, el código de entidad en su header dedicado, ninguna credencial en la URL, una llave de idempotencia única generada por nexgen, y un cuerpo tipado de forma que el proveedor no persiste registro alguno —con prueba que falla si ese cuerpo pudiera persistir factura—; el cableado nuevo se arma sólo en `index.js`, sin que ninguna capa introducida requiera a otra por fuera de su constructor
-**Plans**: 4 plans
+**Plans**: 4 (01-01 … 01-04), todos completos ✓ 2026-09-11
 Plans:
 - [x] 01-01-PLAN.md — Runner de pruebas y congelamiento del camino v1
 - [x] 01-02-PLAN.md — Selector de contrato y configuración v2 con frenos antes de la red
@@ -76,7 +76,7 @@ Plans:
   4. Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que construye, sin salir a la red; la respuesta real de staging archivada en `data/` funciona como fixture de contrato de esas pruebas, y hay prueba que falla si la forma de la respuesta esperada se desvía de ella
   5. Los montos y tasas se escriben con los mismos dígitos que devolvió el proveedor, y hay prueba que falla si alguno pasa por conversión a punto flotante en cualquier punto del camino
   6. El archivo de salida conserva el nombre del archivo de entrada, el prefijo `RESPONSE_`, la numeración original y el directorio de salida, con el cuerpo escrito completo y sin transformar; los errores del contrato v2 se distinguen por su código estable y no por el texto del mensaje; y el identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida
-**Plans**:  4 (01-01 … 01-04), todos completos
+**Plans**: TBD
 
 ### Phase 3: Verificación contra staging y corte documentado
 **Goal**: El área de ERP puede validar las tres operaciones contra staging siguiendo un procedimiento escrito, y queda con una lista de verificación para decidir y ejecutar el corte a producción
