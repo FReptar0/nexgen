@@ -17,17 +17,20 @@ const axios = require('axios');
  * (nunca en la URL), código de entidad en su header dedicado, ninguna
  * traza que pueda llevar la llave, el identificador de petición del
  * proveedor registrado en toda corrida —línea de éxito, mensaje de error y
- * log— para poder levantar soporte (SAFE-06), y los errores clasificados
+ * log— para poder levantar soporte (SAFE-06), los errores clasificados
  * por su código estable (cálculo) o por status (cancelación), nunca por el
- * texto del proveedor (SAFE-05).
+ * texto del proveedor (SAFE-05), y un reintento ÚNICO en proceso con el
+ * mismo cuerpo y la misma llave de idempotencia, sólo cuando es seguro
+ * (SAFE-02).
  */
 class SynexusApiClient {
     /**
      * Constructor con inyección de dependencias
      * @param {SynexusConfig} synexusConfig - Configuración del contrato v2
      * @param {Logger} logger - Instancia del logger
+     * @param {Object} [options] - Opcional. options.wait: (ms) => Promise<void>, la espera entre intentos
      */
-    constructor(synexusConfig, logger) {
+    constructor(synexusConfig, logger, options) {
         this.synexusConfig = synexusConfig;
         this.logger = logger;
         this.timeout = 30000; // 30 segundos, el mismo valor que v1
@@ -36,6 +39,20 @@ class SynexusApiClient {
         // prueba, y un solo lugar que tocar en el siguiente cambio de marca.
         // Es el nombre de la marca nueva; el anterior (X-Syntax-*) ya no aplica.
         this.entityHeaderName = 'X-Synexus-Entity';
+
+        // Reintento (SAFE-02): UN solo reintento, no una política. maxRetries y
+        // retryDelayMs son constantes de la clase —greppables— y NO se leen de
+        // options ni del entorno: con el timeout de 30 s el peor caso es ~61 s,
+        // aceptable para un CLI de una invocación; más reintentos alargan la
+        // corrida sin mejorar la probabilidad de éxito contra un backend caído.
+        // La espera se inyecta únicamente para que la suite de pruebas no
+        // duerma: index.js no pasa opciones y hereda el setTimeout real.
+        const providedOptions = options || {};
+        this.maxRetries = 1;
+        this.retryDelayMs = 1000;
+        this.wait = typeof providedOptions.wait === 'function'
+            ? providedOptions.wait
+            : (ms) => new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
@@ -48,13 +65,40 @@ class SynexusApiClient {
      * @throws {Error} Si la operación no tiene endpoint en el contrato v2 (antes de tocar axios) o si la petición falla
      */
     async makeRequest(operation, requestBody, entityCode) {
+        // La URL se resuelve UNA vez por makeRequest: el reintento reutiliza
+        // la misma, igual que reutiliza el mismo cuerpo.
         const url = this._resolveUrl(operation);
 
         // Esta traza es segura: la URL de v2 no lleva credencial. El cuerpo no
         // se imprime aquí porque la rama v2 del CLI ya lo imprimió, y el objeto
-        // headers no se imprime nunca, por ninguna vía: lleva la llave.
+        // headers no se imprime nunca, por ninguna vía: lleva la llave. Se
+        // imprime una sola vez, antes del primer intento.
         console.log(`Realizando petición ${operation.toUpperCase()} a: ${url}`);
 
+        try {
+            const response = await this._sendWithRetry(operation, url, requestBody, entityCode);
+
+            return this._handleResponse(response, url, operation);
+        } catch (error) {
+            this._handleError(error, url, operation, requestBody);
+            throw error;
+        }
+    }
+
+    /**
+     * UNA llamada a axios con el objeto de configuración de siempre. Recibe el
+     * cuerpo ya construido y lo manda por identidad: en un reintento `data`
+     * es el MISMO objeto que en el primer intento, y por tanto lleva el mismo
+     * request_id. Nunca lanza: devuelve { response } si axios resolvió
+     * (status < 500) o { error } si rechazó (5xx, timeout, red), para que
+     * quien decide el reintento vea los dos desenlaces con la misma forma.
+     * @private
+     * @param {string} url - URL ya resuelta
+     * @param {Object} requestBody - Cuerpo YA construido; se manda tal cual
+     * @param {string} entityCode - Código de entidad ya resuelto
+     * @returns {Promise<{ response?: Object, error?: Error }>}
+     */
+    async _send(url, requestBody, entityCode) {
         try {
             const response = await axios({
                 method: 'POST',
@@ -70,12 +114,121 @@ class SynexusApiClient {
                 // para manejarlos manualmente en _handleResponse
                 validateStatus: (status) => status < 500
             });
-
-            return this._handleResponse(response, url, operation);
+            return { response: response };
         } catch (error) {
-            this._handleError(error, url, operation, requestBody);
-            throw error;
+            return { error: error };
         }
+    }
+
+    /**
+     * Emite la petición y, si el desenlace es de los que es seguro repetir,
+     * la reintenta UNA sola vez con el MISMO cuerpo (SAFE-02).
+     *
+     * Por qué el reintento vive aquí y no en el operador: un humano volviendo
+     * a correr el CLI es un proceso nuevo y, por tanto, un request_id nuevo;
+     * con una llave distinta el proveedor no deduplica y un post_tax podría
+     * registrar la factura dos veces. Dentro del proceso el cuerpo ya
+     * construido se reenvía tal cual, con la misma llave, y el proveedor
+     * cachea la respuesta por request_id durante 5 minutos: repetir el mismo
+     * cuerpo dentro de esa ventana es seguro. La cancelación no lleva llave,
+     * pero es idempotente por naturaleza y su 409 está documentado como
+     * seguro de reintentar.
+     *
+     * El intento que se reintenta NO pasa por _handleError: ni diagnóstico ni
+     * entrada en el log por él. Lo que se reporta es el desenlace del último
+     * intento: la respuesta resuelta (que _handleResponse clasifica) o el
+     * error original de axios, re-lanzado por identidad.
+     * @private
+     * @param {string} operation - Operación a realizar
+     * @param {string} url - URL ya resuelta (una sola vez por makeRequest)
+     * @param {Object} requestBody - Cuerpo YA construido; el mismo objeto en cada intento
+     * @param {string} entityCode - Código de entidad ya resuelto
+     * @returns {Promise<Object>} Respuesta de axios del último intento
+     * @throws {Error} El error de axios del último intento, sin envolver
+     */
+    async _sendWithRetry(operation, url, requestBody, entityCode) {
+        let attempt = 0;
+
+        while (true) {
+            const outcome = await this._send(url, requestBody, entityCode);
+            const reason = this._retryReasonFor(outcome, operation);
+
+            if (reason !== null && attempt < this.maxRetries) {
+                attempt += 1;
+                // La línea de reintento lleva SÓLO la llave de idempotencia (o
+                // dice que no hay) y la razón. Nunca headers, nunca el error
+                // entero: el de axios trae la petición completa en config.
+                console.log(operation === 'cancel_tax'
+                    ? `Reintentando (${attempt}/${this.maxRetries}) con el mismo cuerpo tras ${reason} (la cancelación no lleva llave de idempotencia)`
+                    : `Reintentando (${attempt}/${this.maxRetries}) con la misma llave de idempotencia (request_id=${requestBody.request_id}) tras ${reason}`);
+                await this.wait(this.retryDelayMs);
+                continue;
+            }
+
+            if (outcome.error) {
+                throw outcome.error;
+            }
+            return outcome.response;
+        }
+    }
+
+    /**
+     * Decide si el desenlace de un intento es seguro de repetir y, si lo es,
+     * devuelve la razón (para la línea de reintento). Lista CERRADA:
+     *   - axios rechazó: timeout (ECONNABORTED) y HTTP 502, 503, 504. Nunca
+     *     500 (el proveedor falló procesando: repetir no ayuda), ni
+     *     ECONNREFUSED/ENOTFOUND (un backend caído o una URL mal escrita no
+     *     mejoran en un segundo), ni un error sin código.
+     *   - axios resolvió (4xx dentro del corte de validateStatus): sólo el
+     *     409, y no todo 409. En la cancelación, el contrato lo marca como
+     *     "safe to retry immediately". En el cálculo se ramifica por
+     *     data.code, nunca por el status a secas: invoice_stale_object es
+     *     concurrencia (sí); idempotency_key_conflict es "misma llave, cuerpo
+     *     distinto" (nunca). Un 409 sin code no da razón segura.
+     *   - Todo otro 4xx (401, 400, 404, 422, 429…) y todo 2xx: null. Un 4xx
+     *     es un rechazo semántico: repetir el mismo cuerpo repetiría el
+     *     rechazo. El 429 informa Retry-After al operador (SAFE-05) y no se
+     *     reintenta aquí.
+     * @private
+     * @param {{ response?: Object, error?: Error }} outcome - Lo que devolvió _send
+     * @param {string} operation - Operación en curso
+     * @returns {string|null} La razón en español, o null si no se reintenta
+     */
+    _retryReasonFor(outcome, operation) {
+        if (outcome.error) {
+            const error = outcome.error;
+            if (error.code === 'ECONNABORTED') {
+                return 'timeout (ECONNABORTED)';
+            }
+            const status = error.response ? error.response.status : undefined;
+            if (status === 502 || status === 503 || status === 504) {
+                return `HTTP ${status}`;
+            }
+            return null;
+        }
+
+        const response = outcome.response;
+        if (!response || response.status !== 409) {
+            return null;
+        }
+
+        if (operation === 'cancel_tax') {
+            return 'HTTP 409 en la cancelación (el contrato lo marca como seguro de reintentar)';
+        }
+
+        const data = response.data;
+        const code = data && typeof data === 'object' ? data.code : undefined;
+        if (code === 'invoice_stale_object') {
+            return 'HTTP 409 invoice_stale_object (concurrencia)';
+        }
+        if (code === 'idempotency_key_conflict') {
+            // Rama EXPLÍCITA aunque devuelva lo mismo que la genérica: misma
+            // llave, cuerpo distinto. Alguien cambió el archivo entre corridas;
+            // merece ojos humanos, no un reintento. Está escrita para que un
+            // refactor no la "simplifique" reintentando todos los 409.
+            return null;
+        }
+        return null;
     }
 
     /**
