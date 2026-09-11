@@ -336,8 +336,9 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         expect(apiClient.makeRequest).not.toHaveBeenCalled();
     });
 
-    it('bajo v2 con cuerpo v2 no rechaza con el mensaje de v1: validate y validateCommittedField tienen cero llamadas', async () => {
-        const { handler, spies, apiClient, synexusConfig, synexusApiClient } = buildHandler(createV2Body());
+    it('bajo v2 con cuerpo v2 no rechaza con el mensaje de v1: validate, validateCommittedField y sanitizeStringFields tienen cero llamadas', async () => {
+        const body = createV2Body();
+        const { handler, spies, apiClient, synexusConfig, synexusApiClient } = buildHandler(body);
 
         // Con el cliente v2 inyectado la corrida ya no rechaza: termina en el
         // cliente v2, nunca en el de v1 ni en el mensaje de Committed.
@@ -346,10 +347,14 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
         expect(spies.validate).not.toHaveBeenCalled();
         expect(spies.validateCommittedField).not.toHaveBeenCalled();
+        // Desde WR-03 la rama v2 no sanea: el gate del plan 01-02 contaba dos
+        // llamadas (validar + sanear) y pasa a contar una. El cuerpo que recibe
+        // resolveEntityCode es el crudo, por identidad
         expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
-        expect(spies.sanitizeStringFields).toHaveBeenCalledTimes(1);
+        expect(spies.sanitizeStringFields).not.toHaveBeenCalled();
         expect(synexusConfig.resolveEntityCode).toHaveBeenCalledTimes(1);
-        expect(synexusConfig.resolveEntityCode).toHaveBeenCalledWith(undefined, spies.sanitizeStringFields.mock.results[0].value);
+        expect(synexusConfig.resolveEntityCode).toHaveBeenCalledWith(undefined, body);
+        expect(synexusConfig.resolveEntityCode.mock.calls[0][1]).toBe(body);
         expect(synexusConfig.printProfile).toHaveBeenCalledTimes(1);
         expect(synexusConfig.printProfile).toHaveBeenCalledWith('USA');
         expect(synexusConfig.printProfile.mock.invocationCallOrder[0])
@@ -366,7 +371,7 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 
-    it('bajo v2 resolveEntityCode recibe el cuerpo SANEADO, con el apóstrofo escapado', async () => {
+    it('bajo v2 resolveEntityCode recibe el cuerpo CRUDO: el apóstrofo viaja intacto, sin barra (WR-03)', async () => {
         const body = createV2Body();
         body.customer_id = "Plummer's";
         const { handler, synexusConfig } = buildHandler(body);
@@ -374,8 +379,8 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         await handler.execute(['get_tax', 'a.json', '--api-version=v2']);
 
         const receivedBody = synexusConfig.resolveEntityCode.mock.calls[0][1];
-        expect(receivedBody.customer_id).toBe("Plummer\\'s");
-        expect(receivedBody).not.toBe(body);
+        expect(receivedBody.customer_id).toBe("Plummer's");
+        expect(receivedBody).toBe(body);
     });
 
     it('bajo v2 con readJsonFile devolviendo null rechaza en español y no llega a resolver la entidad', async () => {

@@ -4,10 +4,13 @@
 //   1. validateV2IntentFields como método hermano de validateCommittedField:
 //      guardia de archivo v1, regla de contradicción (OPER-04 bajo v2) y el
 //      campo request_id como propiedad de nexgen.
-//   2. El recorrido de _executeV2 con el TaxValidator REAL: qué se llama, en
-//      qué orden, con qué argumentos, qué NO se llama nunca (validate y
-//      validateCommittedField), y que termina emitiendo con el cliente v2
-//      —o en la guardia de cableado si ese cliente no se inyectó.
+//   2. validateV2FileShape: la forma del archivo bajo v2 —objeto, no arreglo
+//      (WR-04), y no de v1— comprobada antes de resolver la entidad.
+//   3. El recorrido de _executeV2 con el TaxValidator REAL: qué se llama, en
+//      qué orden, con qué argumentos, qué NO se llama nunca (validate,
+//      validateCommittedField y, desde WR-03, sanitizeStringFields: el cuerpo
+//      viaja CRUDO), y que termina emitiendo con el cliente v2 —o en la
+//      guardia de cableado si ese cliente no se inyectó.
 //
 // Ningún archivo de prueba requiere index.js (ejecuta main() al cargarse).
 const TaxValidator = require('../src/validators/taxValidator');
@@ -289,6 +292,89 @@ describe('validateV2IntentFields — método hermano de validateCommittedField, 
     });
 });
 
+describe('validateV2FileShape — la forma del archivo bajo v2: objeto, no arreglo, y no de v1', () => {
+    const arrayMessagePrefix = 'El archivo de entrada debe ser un objeto JSON, no un arreglo';
+    let validator;
+    let logger;
+
+    beforeEach(() => {
+        logger = fakes.createFakeLogger();
+        validator = new TaxValidator(logger);
+    });
+
+    it('un arreglo con un objeto dentro lanza con un mensaje que EMPIEZA por "El archivo de entrada debe ser un objeto JSON, no un arreglo" (WR-04)', () => {
+        let caught = null;
+        try {
+            validator.validateV2FileShape([{ invoice_id: 'X' }]);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith(arrayMessagePrefix)).toBe(true);
+    });
+
+    it('un arreglo vacío lanza igual', () => {
+        expect(() => validator.validateV2FileShape([])).toThrow(arrayMessagePrefix);
+    });
+
+    it('un objeto vacío y un cuerpo v2 normal no lanzan y no escriben en consola ni en el logger', () => {
+        expect(() => validator.validateV2FileShape({})).not.toThrow();
+        expect(() => validator.validateV2FileShape(createV2Body())).not.toThrow();
+        expect(consoleErrorSpy).not.toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('un archivo v1 (Committed: false) lanza con el MISMO mensaje literal que produce validateV2IntentFields para ese archivo', () => {
+        let fromFileShape = null;
+        let fromIntentFields = null;
+        try {
+            validator.validateV2FileShape(createV1Body());
+        } catch (error) {
+            fromFileShape = error;
+        }
+        try {
+            validator.validateV2IntentFields('get_tax', createV1Body(), expectedIntent);
+        } catch (error) {
+            fromIntentFields = error;
+        }
+
+        expect(fromFileShape).not.toBeNull();
+        expect(fromIntentFields).not.toBeNull();
+        expect(fromFileShape.message).toContain(v1FileGuardMessage);
+        expect(fromFileShape.message).toBe(fromIntentFields.message);
+    });
+
+    it('un arreglo cuyo primer elemento trae Committed lanza el mensaje del arreglo, no el de v1: el arreglo se comprueba primero', () => {
+        let caught = null;
+        try {
+            validator.validateV2FileShape([createV1Body()]);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith(arrayMessagePrefix)).toBe(true);
+        expect(caught.message).not.toContain(v1FileGuardMessage);
+    });
+
+    it('usa el trío del repositorio: console.error una vez, logger.error una vez, throw', () => {
+        expect(() => validator.validateV2FileShape([])).toThrow();
+
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        expect(logger.error.mock.calls[0][0]).toContain(arrayMessagePrefix);
+    });
+
+    it('validate() de v1 NO llama a validateV2FileShape: v1 intacto', () => {
+        const spy = jest.spyOn(validator, 'validateV2FileShape');
+
+        validator.validate('get_tax', createV1Body());
+
+        expect(spy).not.toHaveBeenCalled();
+    });
+});
+
 describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidator real', () => {
     // El validador es el TaxValidator REAL con espías que dejan pasar la llamada.
     // Es deliberado: es lo que prueba que un cuerpo SIN Committed atraviesa la
@@ -315,6 +401,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             validateCommittedField: jest.spyOn(validator, 'validateCommittedField'),
             validateRequestBody: jest.spyOn(validator, 'validateRequestBody'),
             sanitizeStringFields: jest.spyOn(validator, 'sanitizeStringFields'),
+            validateV2FileShape: jest.spyOn(validator, 'validateV2FileShape'),
             validateV2IntentFields: jest.spyOn(validator, 'validateV2IntentFields')
         };
         const fileManager = {
@@ -363,14 +450,16 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
 
         await expect(runV2(handler)).resolves.toBeUndefined();
 
-        // Lo que NO se llama nunca bajo v2
+        // Lo que NO se llama nunca bajo v2. sanitizeStringFields desde WR-03:
+        // el escape de apóstrofos es de v1 y corrompería el cable v2
         expect(spies.validate).not.toHaveBeenCalled();
         expect(spies.validateCommittedField).not.toHaveBeenCalled();
+        expect(spies.sanitizeStringFields).not.toHaveBeenCalled();
         expect(apiClient.makeRequest).not.toHaveBeenCalled();
 
         // Lo que se llama, exactamente una vez cada uno
         expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
-        expect(spies.sanitizeStringFields).toHaveBeenCalledTimes(1);
+        expect(spies.validateV2FileShape).toHaveBeenCalledTimes(1);
         expect(synexusConfig.resolveEntityCode).toHaveBeenCalledTimes(1);
         expect(synexusConfig.printProfile).toHaveBeenCalledTimes(1);
         expect(requestBuilder.getIntentFor).toHaveBeenCalledTimes(1);
@@ -378,10 +467,10 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.buildRequestBody).toHaveBeenCalledTimes(1);
         expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
 
-        // El orden: validar → sanear → entidad → perfil → intención → validar intención → construir → emitir
+        // El orden: validar → forma del archivo → entidad → perfil → intención → validar intención → construir → emitir
         const order = [
             spies.validateRequestBody,
-            spies.sanitizeStringFields,
+            spies.validateV2FileShape,
             synexusConfig.resolveEntityCode,
             synexusConfig.printProfile,
             requestBuilder.getIntentFor,
@@ -420,30 +509,46 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 
-    it('pasa al validador la operación, el cuerpo SANEADO y la MISMA intención que devolvió el builder', async () => {
-        const { handler, spies, requestBuilder } = buildHandler(createV2Body());
-
-        await expect(runV2(handler)).resolves.toBeUndefined();
-
-        const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
-        const intent = requestBuilder.getIntentFor.mock.results[0].value;
-        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('get_tax');
-        expect(spies.validateV2IntentFields).toHaveBeenCalledWith('get_tax', sanitizedBody, intent);
-        expect(spies.validateV2IntentFields.mock.calls[0][2]).toBe(intent);
-        expect(spies.validateV2IntentFields.mock.calls[0][1]).toBe(sanitizedBody);
-    });
-
-    it('construye el cuerpo con la operación y el cuerpo saneado, no con el crudo', async () => {
+    it('pasa al validador la operación, el cuerpo CRUDO por identidad y la MISMA intención que devolvió el builder', async () => {
         const rawBody = createV2Body();
-        rawBody.customer_id = "Plummer's";
         const { handler, spies, requestBuilder } = buildHandler(rawBody);
 
         await expect(runV2(handler)).resolves.toBeUndefined();
 
-        const sanitizedBody = spies.sanitizeStringFields.mock.results[0].value;
-        expect(requestBuilder.buildRequestBody).toHaveBeenCalledWith('get_tax', sanitizedBody);
-        expect(requestBuilder.buildRequestBody.mock.calls[0][1]).not.toBe(rawBody);
-        expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).toBe("Plummer\\'s");
+        const intent = requestBuilder.getIntentFor.mock.results[0].value;
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('get_tax');
+        expect(spies.validateV2IntentFields).toHaveBeenCalledWith('get_tax', rawBody, intent);
+        expect(spies.validateV2IntentFields.mock.calls[0][2]).toBe(intent);
+        expect(spies.validateV2IntentFields.mock.calls[0][1]).toBe(rawBody);
+    });
+
+    it('resolveEntityCode, validateV2IntentFields y buildRequestBody reciben el cuerpo CRUDO por identidad, con el apóstrofo intacto (WR-03)', async () => {
+        const rawBody = createV2Body();
+        rawBody.customer_id = "Plummer's";
+        const { handler, spies, requestBuilder, synexusConfig } = buildHandler(rawBody);
+
+        await expect(runV2(handler)).resolves.toBeUndefined();
+
+        expect(synexusConfig.resolveEntityCode.mock.calls[0][1]).toBe(rawBody);
+        expect(spies.validateV2IntentFields.mock.calls[0][1]).toBe(rawBody);
+        expect(requestBuilder.buildRequestBody).toHaveBeenCalledWith('get_tax', rawBody);
+        expect(requestBuilder.buildRequestBody.mock.calls[0][1]).toBe(rawBody);
+        expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).toBe("Plummer's");
+        expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).not.toContain('\\');
+    });
+
+    it('con readJsonFile devolviendo un arreglo bajo v2, rechaza con "no un arreglo" antes de resolver la entidad y sin emitir ni escribir nada (WR-04)', async () => {
+        const { handler, spies, requestBuilder, synexusConfig, synexusApiClient, fileManager } = buildHandler([createV2Body()]);
+
+        await expect(runV2(handler)).rejects.toThrow('no un arreglo');
+
+        expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
+        expect(spies.validateV2FileShape).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.resolveEntityCode).not.toHaveBeenCalled();
+        expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
+        expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 
     it('imprime el cuerpo construido en la salida estándar, con JSON indentado a dos espacios, antes de emitir', async () => {
@@ -523,11 +628,12 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
-    it('con readJsonFile devolviendo null, falla en validateRequestBody y no consulta la intención', async () => {
-        const { handler, requestBuilder, synexusApiClient } = buildHandler(null);
+    it('con readJsonFile devolviendo null, falla en validateRequestBody (que va primero), no comprueba la forma y no consulta la intención', async () => {
+        const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(null);
 
         await expect(runV2(handler)).rejects.toThrow('El cuerpo de la petición no es un objeto válido');
 
+        expect(spies.validateV2FileShape).not.toHaveBeenCalled();
         expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();

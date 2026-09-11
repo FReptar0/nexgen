@@ -215,7 +215,7 @@ describe('Recorrido completo — cotización v2 (get_tax --api-version=v2 --enti
         expect(axiosCallArgument.data.request_id).toMatch(uuidV4Pattern);
     });
 
-    it('el cuerpo conserva los campos del archivo del ERP, saneados', () => {
+    it('el cuerpo conserva los campos del archivo del ERP tal cual', () => {
         expect(axiosCallArgument.data.invoice_id).toBe('DEMO-001');
         expect(axiosCallArgument.data.to_state).toBe('TX');
         expect(axiosCallArgument.data.cart).toEqual([
@@ -572,6 +572,58 @@ describe('Recorrido completo — el archivo que contradice la operación o parec
 
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('parece del contrato v1');
+        expect(axios).not.toHaveBeenCalled();
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+    });
+});
+
+describe('WR-03 y WR-04 — lo que sale al cable v2 no se escapa y un arreglo no sale', () => {
+    const v2Args = ['get_tax', 'a.json', '--api-version=v2', '--entity=USA'];
+
+    it("bajo v2, address_line1 \"O'Brien St\" llega a axios con el apóstrofo intacto y sin barra: la rama v2 no sanea (WR-03)", async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, createProviderResponse()));
+        const graph = buildGraph(v2Args, createV2Body({ address_line1: "O'Brien St" }));
+
+        await graph.handler.execute(v2Args);
+
+        expect(axios).toHaveBeenCalledTimes(1);
+        const sentBody = axios.mock.calls[0][0].data;
+        expect(sentBody.address_line1).toBe("O'Brien St");
+        expect(JSON.stringify(sentBody)).not.toContain("\\'");
+        expect(JSON.stringify(sentBody)).toContain("O'Brien St");
+    });
+
+    it("la misma cadena bajo v1 (Committed: false, Address \"O'Brien St\", sin flags) sale como O\\'Brien St: v1 sigue escapando, y esta aserción congela la diferencia entre contratos (COMP-01)", async () => {
+        // Cliente v1 REAL, como el resto de casos v1 del archivo: es lo que hace
+        // de esto una prueba de no regresión y no una tautología sobre dobles.
+        expect(process.env.TAX_API_VERSION).toBeUndefined();
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { InvoiceTaxAmt: 0 }));
+        const args = ['get_tax', 'a.json'];
+        const v1Body = Object.assign(createV1Body(), { Address: "O'Brien St" });
+        const graph = buildGraph(args, v1Body);
+
+        await graph.handler.execute(args);
+
+        expect(axios).toHaveBeenCalledTimes(1);
+        const call = axios.mock.calls[0][0];
+        expect(call.method).toBe('GET');
+        expect(call.data.Address).toBe("O\\'Brien St");
+        expect(call.data.Address).not.toBe("O'Brien St");
+    });
+
+    it('con readJsonFile devolviendo un arreglo raíz bajo v2, la corrida rechaza con "no un arreglo" en español, axios no se llama y no se escribe archivo (WR-04)', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, createProviderResponse()));
+        const graph = buildGraph(v2Args, [createV2Body()]);
+
+        let caught = null;
+        try {
+            await graph.handler.execute(v2Args);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('El archivo de entrada debe ser un objeto JSON, no un arreglo')).toBe(true);
         expect(axios).not.toHaveBeenCalled();
         expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
