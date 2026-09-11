@@ -15,9 +15,11 @@ const axios = require('axios');
  * Copiado de src/api/taxApiClient.js (congelado) con estas divergencias
  * deliberadas: método POST, credencial en el header Authorization: Bearer
  * (nunca en la URL), código de entidad en su header dedicado, ninguna
- * traza que pueda llevar la llave, y el identificador de petición del
+ * traza que pueda llevar la llave, el identificador de petición del
  * proveedor registrado en toda corrida —línea de éxito, mensaje de error y
- * log— para poder levantar soporte (SAFE-06).
+ * log— para poder levantar soporte (SAFE-06), y los errores clasificados
+ * por su código estable (cálculo) o por status (cancelación), nunca por el
+ * texto del proveedor (SAFE-05).
  */
 class SynexusApiClient {
     /**
@@ -170,9 +172,114 @@ class SynexusApiClient {
     }
 
     /**
+     * Describe en español un error del endpoint de cálculo (get_tax y
+     * post_tax), ramificando por data.code, el código estable del contrato
+     * v2 (SAFE-05). El texto de data.message lo redacta el proveedor y puede
+     * cambiar sin aviso: se cita entre comillas al final y NUNCA se
+     * interpreta. Un código fuera del catálogo cae al genérico con su
+     * literal, para que el operador pueda buscarlo —aquí SÍ hay respaldo,
+     * por decisión de la fase: un código nuevo debe llegar con texto, no
+     * abortar mudo.
+     *
+     * Los dos códigos del 409 tienen semántica opuesta y por eso se
+     * distinguen por code y no por status: idempotency_key_conflict es
+     * "misma llave, cuerpo distinto" (alguien cambió el archivo entre
+     * corridas; no se reintenta, merece ojos humanos) e invoice_stale_object
+     * es concurrencia (reintentar es razonable). El reintento del plan 02-04
+     * ramifica por este mismo code.
+     * @private
+     * @param {number} status - Status HTTP; no clasifica (lo hace code), se recibe por simetría con _describeCancelError
+     * @param {Object} data - Cuerpo del error, con code de tipo cadena
+     * @param {Object} [headers] - Headers de respuesta en minúsculas; sólo se lee retry-after
+     * @returns {string} Descripción en español, con el mensaje del proveedor citado si lo hay
+     */
+    _describeCalculationError(status, data, headers) {
+        const code = data.code;
+        let description;
+
+        if (code === 'invalid_key') {
+            description = 'La llave SYNEXUS_API_KEY fue rechazada por el proveedor. Verifique que sea la llave del ambiente al que apunta SYNEXUS_BASE_URL.';
+        } else if (code === 'tax_code_missing') {
+            description = 'Una línea del carrito no trae tax_code; el proveedor rechaza toda la petición. Corrija la extracción del ERP.';
+        } else if (code === 'idempotency_key_conflict') {
+            description = 'Ya existe una petición con la misma llave de idempotencia y un cuerpo distinto: el archivo cambió entre corridas. No se reintenta; requiere revisión humana.';
+        } else if (code === 'invoice_stale_object') {
+            description = 'La factura cambió mientras el proveedor la procesaba (conflicto de concurrencia). Vuelva a ejecutar la operación.';
+        } else if (code === 'rate_limited') {
+            // De los headers se lee SÓLO retry-after; el objeto nunca se serializa
+            const retryAfter = headers && typeof headers === 'object' ? headers['retry-after'] : undefined;
+            description = typeof retryAfter === 'string' && retryAfter.length > 0
+                ? `El proveedor limitó la tasa de peticiones. Reintente en ${retryAfter} segundos.`
+                : 'El proveedor limitó la tasa de peticiones. Reintente en unos segundos.';
+        } else if (code === 'cart_empty') {
+            description = 'El carrito está vacío: el archivo no trae líneas en cart.';
+        } else if (code === 'validation_error') {
+            // details[]: cadenas tal cual, objetos serializados, unidos con '; '
+            const details = Array.isArray(data.details) && data.details.length > 0
+                ? data.details.map(detail => (typeof detail === 'string' ? detail : JSON.stringify(detail))).join('; ')
+                : 'sin detalles';
+            description = `El proveedor rechazó el cuerpo por validación: ${details}`;
+        } else {
+            description = `El proveedor devolvió el código "${code}".`;
+        }
+
+        return this._quoteProviderMessage(description, data);
+    }
+
+    /**
+     * Describe en español un error del endpoint de cancelación, ramificando
+     * por status HTTP (SAFE-05). Sus errores vienen en forma simple
+     * { error, message }, SIN code; por eso el status es la única señal
+     * estable. Está PROHIBIDO ramificar por el texto de message
+     * (message.includes y parientes): lo redacta el proveedor y puede
+     * cambiar sin aviso, y un cambio de redacción no debe cambiar el
+     * comportamiento de nexgen. Se cita tal cual, entre comillas. Si un
+     * cuerpo de cancelación trajera code, se ignora: aquí clasifica el status.
+     * @private
+     * @param {number} status - Status HTTP de la respuesta
+     * @param {*} data - Cuerpo del error (puede no ser objeto)
+     * @returns {string} Descripción en español, con el mensaje del proveedor citado si lo hay
+     */
+    _describeCancelError(status, data) {
+        let description;
+
+        if (status === 400) {
+            description = 'La cancelación fue rechazada: el cuerpo no es válido para el proveedor.';
+        } else if (status === 404) {
+            description = 'La factura a cancelar no existe en el proveedor: verifique invoice_id y customer_id, y que la factura se haya confirmado contra este mismo ambiente.';
+        } else if (status === 409) {
+            description = 'La cancelación chocó con otra operación en curso sobre la misma factura.';
+        } else if (status === 422) {
+            description = 'El proveedor no puede cancelar esta factura: probablemente ya está cancelada o nunca se confirmó.';
+        } else {
+            description = `La cancelación falló con HTTP ${status}.`;
+        }
+
+        return this._quoteProviderMessage(description, data);
+    }
+
+    /**
+     * Añade a la descripción el mensaje del proveedor, citado entre comillas
+     * y sin interpretarlo, cuando el cuerpo lo trae como cadena.
+     * @private
+     * @param {string} description - Descripción en español ya decidida
+     * @param {*} data - Cuerpo del error
+     * @returns {string} La descripción, con el sufijo si aplica
+     */
+    _quoteProviderMessage(description, data) {
+        const providerMessage = data && typeof data === 'object' ? data.message : undefined;
+        if (typeof providerMessage === 'string') {
+            return `${description} Mensaje del proveedor: "${providerMessage}"`;
+        }
+        return description;
+    }
+
+    /**
      * Maneja la respuesta del proveedor. Toda salida lleva el identificador de
      * petición del proveedor (SAFE-06): la línea de éxito, el mensaje lanzado
-     * y la entrada del log cuando el status es de error.
+     * y la entrada del log cuando el status es de error. Los errores llegan
+     * clasificados (SAFE-05): por código estable en el cálculo, por status en
+     * la cancelación, nunca por el texto del proveedor.
      * @private
      * @param {Object} response - Respuesta de axios
      * @param {string} url - URL de la petición
@@ -191,11 +298,23 @@ class SynexusApiClient {
         const providerRequestId = this._extractProviderRequestId(response);
         const requestIdNote = providerRequestId || 'no informado por el proveedor';
 
-        // Verificar si el servidor indica error mediante el status code
+        // Verificar si el servidor indica error mediante el status code.
+        // Clasificación (SAFE-05): la cancelación por status (sus errores no
+        // traen code); el cálculo por data.code cuando es cadena; sin code,
+        // el molde de v1 (cuerpo serializado). Siempre con el request_id.
         if (response.status >= 400) {
             const data = response.data;
-            const serverErrorMsg = data ? JSON.stringify(this._withoutDocsUrl(data)) : response.statusText;
-            const errorMsg = `Error HTTP ${response.status}: ${serverErrorMsg} - request_id=${requestIdNote}`;
+            let errorMsg;
+            if (operation === 'cancel_tax') {
+                const description = this._describeCancelError(response.status, data);
+                errorMsg = `Error HTTP ${response.status}: ${description} - request_id=${requestIdNote}`;
+            } else if (data && typeof data === 'object' && typeof data.code === 'string') {
+                const description = this._describeCalculationError(response.status, data, response.headers);
+                errorMsg = `Error HTTP ${response.status} (${data.code}): ${description} - request_id=${requestIdNote}`;
+            } else {
+                const serverErrorMsg = data ? JSON.stringify(this._withoutDocsUrl(data)) : response.statusText;
+                errorMsg = `Error HTTP ${response.status}: ${serverErrorMsg} - request_id=${requestIdNote}`;
+            }
             console.error(errorMsg);
             // docs_url va SÓLO al log de winston, nunca a la consola ni al mensaje
             const docsUrlNote = data && typeof data.docs_url === 'string' ? ` - docs_url: ${data.docs_url}` : '';
