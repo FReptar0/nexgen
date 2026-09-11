@@ -46,17 +46,21 @@ esto toca dinero y registros fiscales de un tercero.
 - ✓ Código de entidad por precedencia flag > env > JSON, nunca hardcodeado; aborta en español si no se resuelve — Fase 1
 - ✓ Guardia "archivo parece del contrato v1" bajo selector v2 — Fase 1
 
+<!-- Validado en Fase 2 (2026-09-11): verificado sin red; con esto las tres operaciones funcionan contra v2. -->
+
+- ✓ `post_tax` v2 → `sales_invoice` + `committed: true`, mismo endpoint, con guardia espejo de TEST-03 — Fase 2
+- ✓ `cancel_tax` v2 → `POST /api/v1/invoices/cancel` con proyección exacta `{invoice_id, customer_id}` (cadenas no vacías), sin intención ni `request_id` — Fase 2
+- ✓ Reintento único en proceso con el mismo cuerpo y la misma llave, sólo ante timeout/502/503/504/409 seguro; nunca ante `idempotency_key_conflict` — Fase 2
+- ✓ Fidelidad numérica por paso directo, probada con `FileManager` real; cero `parseFloat` en `src/` — Fase 2
+- ✓ Errores del cálculo por `code` estable (7 + genérico), de cancelación por status; nunca por texto — Fase 2
+- ✓ `request_id` del proveedor en toda corrida: stdout en éxito, mensaje + winston en 4xx, el propio de nexgen sin respuesta — Fase 2
+- ✓ Fixture de contrato real en `tests/fixtures/` con prueba de forma — Fase 2
+- ✓ Rama v2 sin escape de apóstrofos (WR-03) y rechazo de JSON raíz-array (WR-04) — Fase 2
+
 ### Active
 
 <!-- Alcance actual. Hipótesis hasta que se verifiquen contra staging. -->
 
-- [ ] `post_tax` debe confirmar (`transaction_type: "sales_invoice"` + `committed: true`) — Fase 2
-- [ ] `cancel_tax` debe apuntar a `POST /api/v1/invoices/cancel` — Fase 2
-- [ ] Tratar montos y tasas como cadenas decimales de extremo a extremo (cero `parseFloat`) — Fase 2
-- [ ] Respuesta v2 escrita completa y sin transformar, con `request_id` del proveedor registrado — Fase 2
-- [ ] Reintento tras timeout reutiliza la misma llave de idempotencia — Fase 2
-- [ ] Fixture de contrato desde la respuesta real de staging (hoy dentro de un PDF en `data/`) — Fase 2
-- [ ] Decidir el escape de apóstrofos en el cable v2 (WR-03) y la validación de forma del JSON raíz (WR-04) — Fase 2
 - [ ] Procedimiento de verificación contra staging y lista de corte a producción — Fase 3
 - [ ] Camino v1 intacto y funcionando durante toda la migración — continuo, verificado por la suite en cada fase
 
@@ -106,12 +110,10 @@ produce hoy la extracción de Sage** — eso sólo existe en los archivos reales
 El host de documentación de errores que la API devuelve en cada respuesta de error
 (`docs_url`) no resuelve en DNS.
 
-**Estado del repositorio.** Rama `feat/synexus-v2-migration`. **Fase 1 completa
-(2026-09-11):** el camino v2 emite una cotización de punta a punta, verificada sin red;
-v1 congelado por pruebas. Jest 29.7.0 con 9 suites / 242 casos. Sin CI ni linter todavía.
-Mapa del código en `.planning/codebase/` generado 2026-09-10 — **desfasado**: no incluye
-`synexusConfig.js`, `synexusRequestBuilder.js`, `synexusApiClient.js` ni `tests/`;
-refrescar con `/gsd-map-codebase` antes de planear la Fase 2.
+**Estado del repositorio.** Rama `feat/synexus-v2-migration`. **Fases 1 y 2 completas
+(2026-09-11): las tres operaciones funcionan contra v2**, verificadas sin red; v1 congelado por
+pruebas. Jest 29.7.0 con 11 suites / 467 casos. Sin CI ni linter todavía. Mapa del código en
+`.planning/codebase/` refrescado el 2026-09-11 al abrir la Fase 2.
 
 ## Constraints
 
@@ -156,4 +158,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-11 after Phase 1 completion*
+*Last updated: 2026-09-11 after Phase 2 completion*
