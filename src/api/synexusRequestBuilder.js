@@ -5,8 +5,9 @@ const crypto = require('crypto');
  * API Layer - Synexus Request Builder (contrato v2)
  * Responsabilidad: Construir el cuerpo de la petición v2 a partir del archivo
  * del ERP y de la operación invocada. nexgen es dueño de los tres campos de
- * intención —transaction_type, committed y request_id— y los pone a partir de
- * la operación; nunca los hereda del archivo de entrada
+ * intención —transaction_type, committed y request_id— para las DOS operaciones
+ * de cálculo (get_tax y post_tax) y los pone a partir de la operación; nunca
+ * los hereda del archivo de entrada
  * Principio SOLID: Single Responsibility Principle (SRP)
  * Patrón: Dependency Injection
  *
@@ -14,7 +15,10 @@ const crypto = require('crypto');
  * del proveedor es sales_invoice, y committed: false por sí solo NO suprime la
  * persistencia (el proveedor igual guarda un snapshot de factura). Una
  * cotización sólo deja de dejar rastro si se tipa explícitamente como
- * sales_estimate. Ese tipado se decide aquí y en ningún otro sitio.
+ * sales_estimate; y una confirmación sólo registra la factura si va tipada
+ * como sales_invoice Y confirmada. Las dos intenciones son opuestas en los dos
+ * campos, van al mismo endpoint, y se deciden aquí y en ningún otro sitio.
+ * cancel_tax no pasa por este mapeo: va a otro endpoint con otro cuerpo.
  */
 class SynexusRequestBuilder {
     /**
@@ -33,8 +37,8 @@ class SynexusRequestBuilder {
      * Sigue el molde de Config.getEndpointUrl: una comprobación por operación y
      * un throw terminal para todo lo demás. Deliberadamente NO hay rama else con
      * valores por omisión: su ausencia es lo que impide que un refactor futuro
-     * reintroduzca sales_invoice por omisión. TEST-03 es la guardia; la forma de
-     * este método es la primera defensa
+     * reintroduzca sales_invoice por omisión. TEST-03 (cotización) y TEST-02
+     * (confirmación) son las guardias; la forma de este método es la primera defensa
      * @param {string} operation - Operación invocada
      * @returns {{ transaction_type: string, committed: boolean }} Intención de la operación
      * @throws {Error} Si la operación no tiene mapeo de intención en el contrato v2 (OPER-05)
@@ -49,10 +53,23 @@ class SynexusRequestBuilder {
             };
         }
 
-        // post_tax y cancel_tax son de la Fase 2: mientras no tengan mapeo, no
-        // pueden emitirse bajo v2. Cualquier otra operación cae aquí también.
-        const errorMsg = `La operación "${operation}" todavía no tiene mapeo de intención en el contrato v2: ` +
-            'no puede emitirse. Sólo get_tax está mapeada en esta fase.';
+        if (operation === 'post_tax') {
+            // Confirmación: mismo endpoint que la cotización, intención invertida.
+            // sales_invoice + committed: true es la ÚNICA combinación que registra
+            // una factura confirmada del lado del proveedor; sales_invoice con
+            // committed: false deja sólo un snapshot sin confirmar.
+            return {
+                transaction_type: 'sales_invoice',
+                committed: true
+            };
+        }
+
+        // Sólo las dos operaciones de cálculo tienen mapeo de intención.
+        // cancel_tax no pasa por aquí: va a otro endpoint con un cuerpo de
+        // proyección propio. Cualquier otra operación cae aquí también.
+        const errorMsg = `La operación "${operation}" no tiene mapeo de intención en el contrato v2: ` +
+            'no puede emitirse por la ruta de cálculo. Sólo get_tax (sales_estimate) y post_tax (sales_invoice) ' +
+            'tienen mapeo; cancel_tax no pasa por este mapeo.';
         console.error(errorMsg);
         this.logger.error(`${errorMsg} - Operation: ${operation}`);
         throw new Error(errorMsg);
