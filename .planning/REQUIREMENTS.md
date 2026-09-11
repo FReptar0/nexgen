@@ -29,8 +29,8 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 - [ ] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
 - [x] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
 - [x] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
-- [ ] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
-- [ ] **SAFE-06**: El identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida, para poder levantar soporte
+- [x] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
+- [x] **SAFE-06**: El identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida, para poder levantar soporte
 
 ### Configuración (CFG)
 
@@ -120,8 +120,8 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | SAFE-02 | Phase 2 | Pending |
 | SAFE-03 | Phase 1 | Complete |
 | SAFE-04 | Phase 2 | Complete |
-| SAFE-05 | Phase 2 | Pending |
-| SAFE-06 | Phase 2 | Pending |
+| SAFE-05 | Phase 2 | Complete |
+| SAFE-06 | Phase 2 | Complete |
 | CFG-01 | Phase 1 | Complete |
 | CFG-02 | Phase 1 | Complete |
 | CFG-03 | Phase 1 | Complete |

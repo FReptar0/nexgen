@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md
-last_updated: "2026-09-11T21:14:40.569Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-09-11T21:33:41.683Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 8
-  completed_plans: 6
-  percent: 75
+  completed_plans: 7
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 ## Current Position
 
 Phase: 02 (confirmar-cancelar-y-devolver-la-respuesta-ntegra) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-11
 
-Progress: [████████░░] 75%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [████████░░] 75%
 | Phase 01 P04 | 13min | 3 tasks | 13 files |
 | Phase 02 P01 | 15min | 3 tasks | 14 files |
 | Phase 02 P02 | 12min | 2 tasks | 12 files |
+| Phase 02 P03 | 12min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,10 @@ Decisiones que afectan el trabajo actual:
 - [Phase 02]: _buildV2Body en el manejador y _resolveUrl en el cliente bifurcan por operación con throw terminal y sin rama else, con el molde de getIntentFor — Mandar una cancelación a la ruta de cálculo (o al revés) confundiría al proveedor con un cuerpo válido para otra cosa; la URL de cancelación sale sólo de SynexusConfig.getCancelUrl() (CONN-04)
 - [Phase 02]: Las aserciones de campo ausente afirman la lista literal 'falta(n): …' y no sólo que el mensaje contiene el nombre — Los dos nombres también aparecen en la parte fija del mensaje y la mutación 'sin comprobación de customer_id' dejaba pasar el caso 'sin los dos'; se reforzó antes del commit GREEN
 - [Phase 02]: La corrida de humo con el index.js real fue denegada por permisos del entorno y no se rodeó — La cobertura equivalente es v2CancelEndToEnd con el grafo real a mano; index.js está congelado y su cableado ya se probó de humo en 01-04 y 02-01
+- [Phase 02]: docs_url se filtra también de la traza 'Respuesta del servidor:' y del molde serializado con una copia superficial (_withoutDocsUrl) — El plan exige que ninguna línea de consola lo lleve y la traza heredada imprimía el cuerpo entero; la respuesta devuelta y escrita sigue intacta (SAFE-04)
+- [Phase 02]: Los errores v2 se clasifican por data.code (cálculo) y por status HTTP (cancelación), citando el message del proveedor entre comillas sin interpretarlo — Un cambio de redacción del proveedor no debe cambiar el comportamiento de nexgen; gate de grep contra message.includes y parientes, validado por mutación (el mutante dispara el gate)
+- [Phase 02]: El request_id del proveedor se prefiere del cuerpo (meta.request_id / request_id) sobre el header x-request-id, y de los headers sólo se lee ése — Es el que el proveedor cita para soporte; nunca se serializa el objeto headers ni response.config/error.config (CFG-05)
+- [Phase 02]: Los 4xx resueltos lanzan un Error propio marcado con providerResponded/providerRequestId; los errores de axios (5xx, red) se re-lanzan por identidad y el id va a consola y log, no al message — La prueba de identidad de la Fase 1 (toBe) sigue en pie; sin respuesta queda el request_id que generó nexgen, y la cancelación dice 'ninguno'
 
 ### Pending Todos
 
@@ -145,6 +150,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-11T21:14:40.566Z
-Stopped at: Completed 02-02-PLAN.md
+Last session: 2026-09-11T21:33:41.678Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
