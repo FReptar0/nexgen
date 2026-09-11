@@ -11,8 +11,9 @@
 /**
  * Configuration Layer - Synexus Config (contrato v2)
  * Responsabilidad: Centralizar la configuración del contrato v2 y aplicar los
- * frenos de arranque —variables requeridas y correspondencia llave↔host— al
- * construirse, antes de que exista petición alguna
+ * frenos de arranque —variables requeridas, forma de SYNEXUS_BASE_URL (sólo
+ * https y host) y correspondencia llave↔host— al construirse, antes de que
+ * exista petición alguna
  * Principio SOLID aplicado: Single Responsibility Principle (SRP)
  *
  * A diferencia de src/config/index.js, este módulo exporta la CLASE y no una
@@ -76,7 +77,7 @@ class SynexusConfig {
         }
 
         const expectedHost = this.keyPrefixHosts[prefix];
-        const configuredHost = this._getConfiguredHost();
+        const configuredHost = this._getConfiguredUrl().hostname;
 
         if (configuredHost !== expectedHost) {
             const errorMsg = `La llave con prefijo ${prefix} sólo es válida contra ${expectedHost}, ` +
@@ -98,23 +99,71 @@ class SynexusConfig {
     }
 
     /**
-     * Extrae el hostname de SYNEXUS_BASE_URL. Envuelve al constructor URL para que
-     * una variable malformada produzca un mensaje en español, no un TypeError de Node
+     * Parsea SYNEXUS_BASE_URL y exige que sea SÓLO esquema https y host. Envuelve
+     * al constructor URL para que una variable malformada produzca un mensaje en
+     * español, no un TypeError de Node, y rechaza —antes de cualquier salida a la
+     * red— las formas que el freno de hostname dejaba pasar:
+     *   - http://           la llave viaja en un header y saldría en texto claro
+     *   - una ruta          getCalculationUrl la duplicaría (/api/v1/api/v1/... → 404)
+     *   - query o fragmento acabarían incrustados a mitad de la URL de cálculo
+     *   - usuario:contraseña@  se imprimiría en el perfil y en la traza de la petición
+     * Cada rechazo nombra lo que encontró y lo que esperaba. Cuando la variable trae
+     * credenciales no se repite tal cual en el mensaje: se enmascaran
      * @private
-     * @returns {string} hostname configurado
-     * @throws {Error} Si la variable no es una URL válida
+     * @returns {URL} URL configurada, ya validada
+     * @throws {Error} Si la variable no es una URL válida, no usa https, o trae
+     *   ruta, query, fragmento o credenciales
      */
-    _getConfiguredHost() {
+    _getConfiguredUrl() {
         const baseUrl = this.getBaseUrl();
+        const example = 'Ejemplo: https://compute.staging.synexustax.com';
+        let url;
 
         try {
-            return new URL(baseUrl).hostname;
+            url = new URL(baseUrl);
         } catch (err) {
-            const errorMsg = `SYNEXUS_BASE_URL no es una URL válida: "${baseUrl}". ` +
-                'Ejemplo: https://compute.staging.synexustax.com';
+            const errorMsg = `SYNEXUS_BASE_URL no es una URL válida: "${baseUrl}". ${example}`;
             console.error(errorMsg);
             throw new Error(errorMsg);
         }
+
+        if (url.protocol !== 'https:') {
+            const errorMsg = `SYNEXUS_BASE_URL debe usar el esquema https:, pero usa ${url.protocol} ("${baseUrl}"). ` +
+                `La llave viaja en un header y no puede salir en texto claro. ${example}`;
+            console.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
+        // Lo que sobra después de esquema y host, nombrado parte por parte para que
+        // el operador vea exactamente qué recortar de la variable
+        const leftovers = [];
+        const hasCredentials = Boolean(url.username || url.password);
+        if (hasCredentials) {
+            leftovers.push('credenciales (usuario:contraseña@)');
+        }
+        if (url.pathname !== '/' && url.pathname !== '') {
+            leftovers.push(`la ruta "${url.pathname}"`);
+        }
+        if (url.search) {
+            leftovers.push(`la consulta "${url.search}"`);
+        }
+        if (url.hash) {
+            leftovers.push(`el fragmento "${url.hash}"`);
+        }
+
+        if (leftovers.length > 0) {
+            // Con credenciales, el valor crudo se enmascara: el mensaje va a consola
+            // y al log, y una contraseña no debe acabar en ninguno de los dos
+            const shownUrl = hasCredentials
+                ? baseUrl.replace(/^([^:]+:\/\/)[^/?#@]*@/, '$1***@')
+                : baseUrl;
+            const errorMsg = `SYNEXUS_BASE_URL debe ser sólo esquema y host, pero trae ${leftovers.join(', ')}: "${shownUrl}". ` +
+                `La ruta ${this.calculationPath} la agrega nexgen. ${example}`;
+            console.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
+        return url;
     }
 
     /**
@@ -136,12 +185,13 @@ class SynexusConfig {
 
     /**
      * Compone la URL de cálculo: host de configuración + ruta canónica (CONN-04).
-     * Quita barras finales sobrantes de la base para no producir una barra doble
+     * Parte del origin (esquema + host) de la URL ya validada, no de la cadena
+     * cruda: así una barra final en la variable no produce barra doble, y nada
+     * de lo que _getConfiguredUrl rechaza puede colarse en la URL de cálculo
      * @returns {string} URL completa del endpoint de cálculo
      */
     getCalculationUrl() {
-        const baseUrl = this.getBaseUrl().replace(/\/+$/, '');
-        return `${baseUrl}${this.calculationPath}`;
+        return `${this._getConfiguredUrl().origin}${this.calculationPath}`;
     }
 
     /**

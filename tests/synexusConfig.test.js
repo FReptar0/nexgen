@@ -164,6 +164,90 @@ describe('SynexusConfig — correspondencia llave↔host (SAFE-03, TEST-05)', ()
     });
 });
 
+describe('SynexusConfig — forma de SYNEXUS_BASE_URL: sólo https y host (SAFE-03, CONN-04)', () => {
+    // Todas las formas rechazadas usan el host de staging con la llave de
+    // prueba: la correspondencia llave↔host es correcta, así que lo único que
+    // puede abortar es la forma de la URL. Y aborta al construir, es decir,
+    // antes de que exista petición alguna.
+    beforeEach(() => {
+        process.env.SYNEXUS_API_KEY = testKey;
+    });
+
+    it('http:// se rechaza al construir aunque el host corresponda a la llave: la llave no puede viajar en texto claro', () => {
+        process.env.SYNEXUS_BASE_URL = 'http://compute.staging.synexustax.com';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error).not.toBeInstanceOf(TypeError);
+        expect(error.message).toContain('SYNEXUS_BASE_URL');
+        expect(error.message).toContain('https:');
+        expect(error.message).toContain('http:');
+        expect(consoleErrorSpy).toHaveBeenCalledWith(error.message);
+    });
+
+    it('una ruta (/api/v1, la forma en que suelen documentarse las "base URL") se rechaza nombrando la ruta encontrada', () => {
+        process.env.SYNEXUS_BASE_URL = 'https://compute.staging.synexustax.com/api/v1';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error.message).toContain('SYNEXUS_BASE_URL');
+        expect(error.message).toContain('la ruta "/api/v1"');
+        expect(error.message).toContain('Ejemplo: https://compute.staging.synexustax.com');
+        expect(consoleErrorSpy).toHaveBeenCalledWith(error.message);
+    });
+
+    it('una consulta (?x=1) se rechaza nombrando la consulta encontrada', () => {
+        process.env.SYNEXUS_BASE_URL = 'https://compute.staging.synexustax.com/?x=1';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error.message).toContain('la consulta "?x=1"');
+        expect(error.message).toContain('Ejemplo: https://compute.staging.synexustax.com');
+    });
+
+    it('un fragmento (#seccion) se rechaza nombrando el fragmento encontrado', () => {
+        process.env.SYNEXUS_BASE_URL = 'https://compute.staging.synexustax.com#seccion';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error.message).toContain('el fragmento "#seccion"');
+    });
+
+    it('credenciales (user:pw@) se rechazan y ni el usuario ni la contraseña se repiten en el mensaje', () => {
+        process.env.SYNEXUS_BASE_URL = 'https://admin-xyz:secreto-xyz@compute.staging.synexustax.com';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error.message).toContain('credenciales');
+        expect(error.message).toContain('***@compute.staging.synexustax.com');
+        expect(error.message).not.toContain('secreto-xyz');
+        expect(error.message).not.toContain('admin-xyz');
+        expect(consoleErrorSpy).toHaveBeenCalledWith(error.message);
+    });
+
+    it('si sobran varias partes, el mensaje las nombra todas', () => {
+        process.env.SYNEXUS_BASE_URL = 'https://compute.staging.synexustax.com/api/v1?x=1#f';
+
+        const error = constructAndCatch();
+        expect(error).not.toBeNull();
+        expect(error.message).toContain('la ruta "/api/v1"');
+        expect(error.message).toContain('la consulta "?x=1"');
+        expect(error.message).toContain('el fragmento "#f"');
+    });
+
+    it('sólo esquema y host construye sin lanzar', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost;
+        expect(() => new SynexusConfig()).not.toThrow();
+    });
+
+    it('una barra final se tolera: construye sin lanzar y la URL de cálculo es la misma que sin barra', () => {
+        process.env.SYNEXUS_BASE_URL = stagingHost + '/';
+        expect(() => new SynexusConfig()).not.toThrow();
+        expect(new SynexusConfig().getCalculationUrl())
+            .toBe('https://compute.staging.synexustax.com/api/v1/tax_calculations');
+    });
+});
+
 describe('SynexusConfig — getCalculationUrl (CONN-04)', () => {
     beforeEach(() => {
         process.env.SYNEXUS_API_KEY = testKey;
