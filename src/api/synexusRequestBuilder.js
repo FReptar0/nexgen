@@ -125,24 +125,31 @@ class SynexusRequestBuilder {
      * ya cancelada devuelve 404/422 sin doble efecto, y el 409 de este endpoint
      * está documentado como seguro de reintentar. Tampoco lleva transaction_type
      * ni committed: no hay intención que declarar, así que no pasa por
-     * getIntentFor ni genera llave. Sólo se exige presencia, no tipo: nexgen no
+     * getIntentFor ni genera llave. Se exige presencia y tipo cadena no vacía (WR-01): nexgen no
      * valida el esquema del ERP, sólo que los dos campos del contrato estén
      * @param {Object} requestBody - Cuerpo ya validado en forma, tal como lo dejó el ERP
      * @returns {{ invoice_id: *, customer_id: * }} Objeto nuevo con exactamente esas dos llaves
-     * @throws {Error} Si invoice_id o customer_id es undefined, null o cadena vacía, nombrando el o los que faltan
+     * @throws {Error} Si invoice_id o customer_id falta, no es cadena o es cadena en blanco; nombra cada campo inválido con la razón
      */
     buildCancelBody(requestBody) {
-        // 1. Presencia de los dos campos del contrato. Ausente = undefined, null
-        //    o cadena vacía; se recolectan todos los que falten para nombrarlos
-        //    juntos, como hace _validateRequiredEnvVars con las variables
-        const missingFields = ['invoice_id', 'customer_id'].filter(field => {
-            const value = requestBody[field];
-            return value === undefined || value === null || value === '';
-        });
+        // 1. Presencia Y tipo de los dos campos del contrato: el proveedor los
+        //    tipa como cadena, así que un número, un booleano, un objeto o una
+        //    cadena en blanco no sirven aunque "estén". Se recolectan todos los
+        //    que fallen para nombrarlos juntos con el tipo recibido, como hace
+        //    _validateRequiredEnvVars con las variables. (WR-01 del review de la Fase 2)
+        const invalidFields = ['invoice_id', 'customer_id']
+            .map(field => {
+                const value = requestBody[field];
+                if (value === undefined || value === null) return `${field} (ausente)`;
+                if (typeof value !== 'string') return `${field} (debe ser cadena, llegó ${Array.isArray(value) ? 'arreglo' : typeof value})`;
+                if (value.trim() === '') return `${field} (cadena vacía)`;
+                return null;
+            })
+            .filter(Boolean);
 
-        if (missingFields.length > 0) {
-            const errorMsg = 'Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y "customer_id"; ' +
-                `falta(n): ${missingFields.join(', ')}. La cancelación aborta antes de emitir petición alguna.`;
+        if (invalidFields.length > 0) {
+            const errorMsg = 'Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y "customer_id" como cadenas no vacías; ' +
+                `inválido(s): ${invalidFields.join(', ')}. La cancelación aborta antes de emitir petición alguna.`;
             console.error(errorMsg);
             this.logger.error(errorMsg);
             throw new Error(errorMsg);

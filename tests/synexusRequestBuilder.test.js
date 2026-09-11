@@ -379,7 +379,7 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         expect(caught.message).toContain('invoice_id');
         // La lista de faltantes, literal: los dos nombres también aparecen en
         // la parte fija del mensaje, así que "contiene invoice_id" no basta
-        expect(caught.message).toContain('falta(n): invoice_id.');
+        expect(caught.message).toContain('inválido(s): invoice_id (ausente).');
     });
 
     it('sin customer_id lanza nombrando customer_id', () => {
@@ -387,7 +387,7 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         delete input.customer_id;
 
         expect(() => builder.buildCancelBody(input)).toThrow(cancelMessagePrefix);
-        expect(() => builder.buildCancelBody(input)).toThrow('falta(n): customer_id.');
+        expect(() => builder.buildCancelBody(input)).toThrow('inválido(s): customer_id (ausente).');
     });
 
     it('sin los dos, el mensaje nombra los dos', () => {
@@ -403,7 +403,7 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         }
 
         expect(caught).not.toBeNull();
-        expect(caught.message).toContain('falta(n): invoice_id, customer_id.');
+        expect(caught.message).toContain('inválido(s): invoice_id (ausente), customer_id (ausente).');
     });
 
     it('invoice_id vacío ("") cuenta como ausente', () => {
@@ -411,6 +411,22 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
 
         expect(() => builder.buildCancelBody(input)).toThrow('invoice_id');
     });
+
+    // WR-01 (review Fase 2): el contrato tipa los dos campos como cadena. Antes
+    // sólo se rechazaba undefined/null/''; 0, false, {}, [], "   " y 12345
+    // atravesaban la guardia y salían al cable.
+    describe('WR-01: tipo de invoice_id y customer_id', () => {
+        it.each([
+            ['número', 12345, 'invoice_id (debe ser cadena, llegó number)'],
+            ['cero', 0, 'invoice_id (debe ser cadena, llegó number)'],
+            ['booleano', false, 'invoice_id (debe ser cadena, llegó boolean)'],
+            ['objeto', {}, 'invoice_id (debe ser cadena, llegó object)'],
+            ['arreglo', [], 'invoice_id (debe ser cadena, llegó arreglo)'],
+            ['sólo espacios', '   ', 'invoice_id (cadena vacía)']
+        ])('invoice_id como %s se rechaza antes de la red', (_label, value, expected) => {
+            const input = Object.assign(createCancelFile(), { invoice_id: value });
+            expect(() => builder.buildCancelBody(input)).toThrow(expected);
+        });
 
     it('invoice_id null cuenta como ausente', () => {
         const input = Object.assign(createCancelFile(), { invoice_id: null });
@@ -482,5 +498,16 @@ describe('_assertIntentFieldsPresent — un campo de intención ausente aborta a
         expect(() => builder.buildRequestBody('get_tax', createV2Body())).toThrow();
         expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
         expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+        it('customer_id numérico se rechaza nombrando el tipo', () => {
+            const input = Object.assign(createCancelFile(), { customer_id: 42 });
+            expect(() => builder.buildCancelBody(input)).toThrow('customer_id (debe ser cadena, llegó number)');
+        });
+
+        it('una cadena con espacios alrededor sigue siendo válida y viaja tal cual', () => {
+            const input = Object.assign(createCancelFile(), { invoice_id: ' INV-7 ' });
+            expect(builder.buildCancelBody(input)).toEqual({ invoice_id: ' INV-7 ', customer_id: input.customer_id });
+        });
     });
 });
