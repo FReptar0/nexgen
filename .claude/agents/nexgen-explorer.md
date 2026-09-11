@@ -48,22 +48,28 @@ Work in this order, in **one pass**:
      `validateRequestBody`, `validateCommittedField`,
      `sanitizeStringFields`) →
      `apiClient.makeRequest` (URL via `Config.getEndpointUrl`) →
-   - **v2 (`_executeV2`):** `validateRequestBody` → `sanitizeStringFields`
+   - **v2 (`_executeV2`):** `validateRequestBody` →
+     `validator.validateV2FileShape` (aborts on a root array — WR-04 —
+     or on `Committed`, i.e. a v1 file, *before* the entity is resolved)
      → `synexusConfig.resolveEntityCode` (`--entity` > `SYNEXUS_ENTITY` >
      `entity_id`) → `printProfile` (masked key) →
      `requestBuilder.getIntentFor` → `validator.validateV2IntentFields`
      (aborts on `Committed`, on a contradicting `transaction_type` /
      `committed`, or on an inherited `request_id`) →
      `requestBuilder.buildRequestBody` → wiring guard →
-     `synexusApiClient.makeRequest`. `validate()` and
-     `validateCommittedField` are **never** called on this branch. →
+     `synexusApiClient.makeRequest`. `validate()`,
+     `validateCommittedField` **and `sanitizeStringFields`** are **never**
+     called on this branch: the file's strings travel verbatim (WR-03). →
    - `_saveResponse` (which calls `getResponseFileName`,
      `ensureDirectory`, `writeJsonFile`) — same for both contracts.
 4. **Validation step**: state what would pass/fail for this payload.
    For `get_tax`/`post_tax` under v1, check `Committed` value. Under v2
-   the file must **not** carry `Committed`, and only `get_tax` has an
-   intent mapping in this phase (`sales_estimate` + `committed: false`).
-   Note the sanitization scope (only `'` → `\'`).
+   the file must **not** carry `Committed` and must be an object, not an
+   array; the intent mapping is `get_tax` → `sales_estimate` +
+   `committed: false` and `post_tax` → `sales_invoice` + `committed: true`
+   (same calculation endpoint, inverted intent). `cancel_tax` under v2 is
+   plan 02-02. Note the sanitization scope (only `'` → `\'`, **v1 only**;
+   v2 does not sanitize).
 5. **API step**: under v1, compute the URL using `Config.getEndpointUrl`.
    Note `TEST_MODE` from `.env` if accessible, otherwise show both
    possibilities. The HTTP method is `GET` with body (unusual — call

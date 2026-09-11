@@ -16,10 +16,15 @@ outcome.
 
 > **Contract note.** This command runs the **v1** path by default. The
 > `--api-version=v2` flag (or `TAX_API_VERSION=v2`) selects the Synexus
-> Compute contract, but `post_tax` is **not mapped under v2 yet** (phase 2
-> of the migration): with the flag, the run aborts before any request with
-> `todavía no tiene mapeo de intención en el contrato v2`. Do not add the
-> flag here; everything below describes v1.
+> Compute contract. Under v2, `post_tax` goes to the **same** calculation
+> route as `get_tax` with the intent inverted: `transaction_type:
+> "sales_invoice"` + `committed: true` — the only combination that
+> registers a confirmed invoice on the provider side. The file must be in
+> v2 shape (no `Committed`; a file with `committed: false` or
+> `transaction_type: "sales_estimate"` aborts before any request), the
+> `SYNEXUS_*` variables must be set, and the response is written verbatim
+> to `RESPONSE_<file>.json` with amounts as quoted strings. Do not add the
+> flag unless the user asks for v2; everything below describes v1.
 
 ## Pre-flight (mandatory)
 

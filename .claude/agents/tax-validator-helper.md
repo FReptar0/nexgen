@@ -35,6 +35,14 @@ The class `TaxValidator` exposes:
   `request_id`. It is called **only** by `_executeV2` in the CLI layer
   and is **deliberately not part of `validate()`** — the v2 file has no
   `Committed`, so the v1 aggregator would reject every real v2 file.
+- `validateV2FileShape(requestBody)` — sibling for the **v2** contract,
+  called by `_executeV2` right after `validateRequestBody` and *before*
+  the entity is resolved: aborts if the root is an array (WR-04, Spanish
+  message "El archivo de entrada debe ser un objeto JSON, no un
+  arreglo") or if the file carries `Committed` (same literal message as
+  the guard in `validateV2IntentFields`, kept as defence in depth). It
+  serves all three v2 operations, including cancellation. Not part of
+  `validate()`; `validateRequestBody` stays untouched because v1 uses it.
 
 Every error path follows this template:
 
@@ -65,9 +73,12 @@ throw new Error(errorMsg);
    - `validate()` must keep returning a sanitized body.
    - New **v1** checks should be reachable from `validate()` so callers
      (CLI layer) don't need changes. New **v2** checks go in (or next to)
-     `validateV2IntentFields`, never in `validate()`: the two branches are
-     kept apart on purpose, and `validateCommittedField` is frozen by the
-     test suite (`tests/v1Freeze.messages.test.js`).
+     `validateV2FileShape` / `validateV2IntentFields`, never in
+     `validate()`: the two branches are kept apart on purpose, and
+     `validateCommittedField` is frozen by the test suite
+     (`tests/v1Freeze.messages.test.js`). Since phase 2 the file only
+     gains lines: `git diff 4d6d438 -- src/validators/taxValidator.js`
+     must show no deletions.
    - Error path uses the `console.error` + `logger.error` + `throw`
      trio.
    - Error messages in Spanish, addressed to the operator.
@@ -88,13 +99,16 @@ throw new Error(errorMsg);
 - **Do not silently widen** the operations list. If `validOperations`
   grows, surface it as a deliberate change.
 - **Do not remove** `sanitizeStringFields` defensiveness — it's
-  load-bearing for the production wire payload (see `docs/MEMORY.md`
-  D3).
+  load-bearing for the **v1** production wire payload (see
+  `docs/MEMORY.md` D3). The **v2** branch deliberately does not call it
+  (WR-03: `JSON.stringify` would ship `O\'Brien` to the provider's fiscal
+  records); do not "fix" that by calling it from `_executeV2`.
 - **Do not switch error messages to English.** The CLI surface is
   Spanish.
 - **Tests exist**: `npm test` runs Jest (`tests/*.test.js`, no `.env`,
   no network). `tests/v1Freeze.messages.test.js` freezes the v1 messages
-  and `tests/v2IntentValidation.test.js` covers `validateV2IntentFields`.
+  and `tests/v2IntentValidation.test.js` covers `validateV2IntentFields`
+  and `validateV2FileShape`.
   Any change to this file must keep the suite green; add cases in
   `tests/` rather than inventing another location.
 
