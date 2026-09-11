@@ -6,7 +6,9 @@ const axios = require('axios');
  * Responsabilidad: Gestionar todas las peticiones HTTP al proveedor del
  * contrato v2 (Synexus Compute). Recibe el cuerpo YA construido por
  * SynexusRequestBuilder y la entidad ya resuelta: este cliente no construye
- * nada, sólo emite
+ * nada, sólo emite. Enruta por operación: get_tax y post_tax van al endpoint
+ * de cálculo, cancel_tax al de cancelación; las URL las da SynexusConfig,
+ * este cliente no compone rutas (CONN-04)
  * Principio SOLID: Single Responsibility Principle (SRP)
  * Patrón: Dependency Injection
  *
@@ -33,15 +35,16 @@ class SynexusApiClient {
     }
 
     /**
-     * Realiza una petición al proveedor v2
+     * Realiza una petición al proveedor v2, contra el endpoint que corresponde
+     * a la operación
      * @param {string} operation - Operación a realizar
-     * @param {Object} requestBody - Cuerpo YA construido (intención + request_id incluidos)
+     * @param {Object} requestBody - Cuerpo YA construido (el tipado del cálculo o la proyección de la cancelación)
      * @param {string} entityCode - Código de entidad ya resuelto
      * @returns {Promise<Object>} Respuesta del proveedor, sin transformar
-     * @throws {Error} Si la petición falla
+     * @throws {Error} Si la operación no tiene endpoint en el contrato v2 (antes de tocar axios) o si la petición falla
      */
     async makeRequest(operation, requestBody, entityCode) {
-        const url = this.synexusConfig.getCalculationUrl();
+        const url = this._resolveUrl(operation);
 
         // Esta traza es segura: la URL de v2 no lleva credencial. El cuerpo no
         // se imprime aquí porque la rama v2 del CLI ya lo imprimió, y el objeto
@@ -69,6 +72,37 @@ class SynexusApiClient {
             this._handleError(error, url, operation);
             throw error;
         }
+    }
+
+    /**
+     * Resuelve la URL del endpoint según la operación, pidiéndosela a
+     * SynexusConfig: get_tax y post_tax comparten la ruta de cálculo y
+     * cancel_tax va a la de cancelación. Este cliente no compone rutas ni
+     * conoce sus cadenas (CONN-04).
+     *
+     * Sigue el molde de getIntentFor: comprobación por operación y throw
+     * terminal, SIN rama else con valor por omisión. Mandar una cancelación a
+     * la ruta de cálculo —o al revés— confundiría al proveedor con un cuerpo
+     * válido para otra cosa; por eso una operación sin endpoint aborta aquí,
+     * antes de tocar axios
+     * @private
+     * @param {string} operation - Operación a realizar
+     * @returns {string} URL completa del endpoint
+     * @throws {Error} Si la operación no tiene endpoint en el contrato v2
+     */
+    _resolveUrl(operation) {
+        if (operation === 'cancel_tax') {
+            return this.synexusConfig.getCancelUrl();
+        }
+
+        if (operation === 'get_tax' || operation === 'post_tax') {
+            return this.synexusConfig.getCalculationUrl();
+        }
+
+        const errorMsg = `La operación "${operation}" no tiene endpoint en el contrato v2.`;
+        console.error(errorMsg);
+        this.logger.error(`${errorMsg} - Operation: ${operation}`);
+        throw new Error(errorMsg);
     }
 
     /**
@@ -166,14 +200,37 @@ class SynexusApiClient {
     }
 
     /**
-     * Realiza una petición para cotizar impuestos (get_tax) bajo el contrato v2.
-     * postTax y cancelTax son de la Fase 2
+     * Realiza una petición para cotizar impuestos (get_tax) bajo el contrato v2:
+     * estimación de venta, sin persistencia del lado del proveedor
      * @param {Object} requestBody - Cuerpo ya construido por SynexusRequestBuilder
      * @param {string} entityCode - Código de entidad ya resuelto
      * @returns {Promise<Object>} Respuesta del proveedor
      */
     async getTax(requestBody, entityCode) {
         return this.makeRequest('get_tax', requestBody, entityCode);
+    }
+
+    /**
+     * Realiza una petición para confirmar impuestos (post_tax) bajo el contrato
+     * v2: factura confirmada, mismo endpoint que la cotización
+     * @param {Object} requestBody - Cuerpo ya construido por SynexusRequestBuilder
+     * @param {string} entityCode - Código de entidad ya resuelto
+     * @returns {Promise<Object>} Respuesta del proveedor
+     */
+    async postTax(requestBody, entityCode) {
+        return this.makeRequest('post_tax', requestBody, entityCode);
+    }
+
+    /**
+     * Realiza una petición para cancelar una transacción confirmada
+     * (cancel_tax) bajo el contrato v2: otro endpoint, con la proyección
+     * { invoice_id, customer_id } que construye SynexusRequestBuilder
+     * @param {Object} requestBody - Proyección ya construida por SynexusRequestBuilder.buildCancelBody
+     * @param {string} entityCode - Código de entidad ya resuelto
+     * @returns {Promise<Object>} Respuesta del proveedor
+     */
+    async cancelTax(requestBody, entityCode) {
+        return this.makeRequest('cancel_tax', requestBody, entityCode);
     }
 }
 

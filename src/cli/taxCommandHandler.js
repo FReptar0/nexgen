@@ -17,7 +17,7 @@ class TaxCommandHandler {
      * @param {TaxValidator} validator - Validador
      * @param {TaxApiClient} apiClient - Cliente API (contrato v1)
      * @param {SynexusConfig|null} synexusConfig - Configuración del contrato v2; null cuando el contrato resuelto es v1
-     * @param {SynexusRequestBuilder} requestBuilder - Constructor del cuerpo v2 (intención + llave de idempotencia)
+     * @param {SynexusRequestBuilder} requestBuilder - Constructor del cuerpo v2 (tipado con intención + llave para el cálculo; proyección para la cancelación)
      * @param {SynexusApiClient|null} synexusApiClient - Cliente API del contrato v2; null cuando el contrato resuelto es v1
      */
     constructor(config, logger, fileManager, validator, apiClient, synexusConfig, requestBuilder, synexusApiClient) {
@@ -191,24 +191,25 @@ class TaxCommandHandler {
 
     /**
      * Rama v2 de execute(): valida el cuerpo y la forma del archivo, resuelve
-     * la entidad, anuncia el perfil efectivo, valida la intención del archivo
-     * contra la de la operación, construye el cuerpo tipado, lo imprime, pasa
-     * la guardia de cableado y emite la petición con el cliente v2.
+     * la entidad, anuncia el perfil efectivo, construye el cuerpo v2 según la
+     * operación (bifurcación en _buildV2Body: cálculo o cancelación), lo
+     * imprime, pasa la guardia de cableado y emite la petición con el cliente v2.
      *
      * No usa el agregador del validador porque el archivo v2 no trae el campo
      * Committed —es del contrato v1— y la validación de ese campo rechazaría todo
      * archivo v2 real. Tampoco sanea: el cuerpo viaja CRUDO (ver el paso 2).
      * validateOperation no se repite: ya corrió en el paso 2 de execute, común
      * a los dos contratos. La validación estricta de v2 es
-     * validateV2IntentFields, con la intención que devuelve el builder.
+     * validateV2IntentFields, con la intención que devuelve el builder, y sólo
+     * aplica a las operaciones de cálculo (ver _buildV2Body).
      * @private
      * @param {string} operation - Operación ya validada
      * @param {Object} requestBody - Cuerpo CRUDO, tal como salió de readJsonFile
      * @param {string|undefined} entityCode - Valor del flag --entity=, si se dio
      * @returns {Promise<Object>} Respuesta del proveedor v2, tal cual la devolvió el cliente
      * @throws {Error} Si el cuerpo no es un objeto, si es un arreglo o parece de v1, si la entidad no se
-     *   resuelve, si la operación no tiene mapeo de intención, si el archivo contradice la operación,
-     *   si falta el cliente v2, o si la petición falla
+     *   resuelve, si la operación no tiene constructor de cuerpo, si el archivo contradice la operación
+     *   o no trae lo que la cancelación exige, si falta el cliente v2, o si la petición falla
      */
     async _executeV2(operation, requestBody, entityCode) {
         // 1. Mismo freno que v1: un cuerpo nulo debe fallar en español, no con un TypeError
@@ -217,7 +218,8 @@ class TaxCommandHandler {
         // 2. La forma del archivo bajo v2: objeto —no arreglo— y no de v1. Va
         //    ANTES de resolver la entidad, así que un archivo v1 bajo v2 aborta
         //    con la causa raíz y no con "no se pudo resolver el código de entidad"
-        //    (IN-08 del review de la Fase 1).
+        //    (IN-08 del review de la Fase 1). Aplica a las TRES operaciones,
+        //    incluida la cancelación.
         //
         //    La rama v2 NO sanea (WR-03). sanitizeStringFields sustituye ' por \'
         //    y nació como parche de la API legada de v1; en el cable v2
@@ -233,21 +235,14 @@ class TaxCommandHandler {
         // 4. Anunciar el perfil efectivo antes de cualquier salida a la red
         this.synexusConfig.printProfile(resolvedEntityCode);
 
-        // 5. La intención primero: una operación sin mapeo en el contrato v2 aborta
-        //    aquí, antes de que se valide o se construya nada
-        const intent = this.requestBuilder.getIntentFor(operation);
-
-        // 6. Validar antes de construir: un archivo que contradice la operación (o
-        //    que parece de v1) aborta antes de que exista un cuerpo. La intención
-        //    que se compara es la MISMA que devolvió el builder: una sola fuente
-        this.validator.validateV2IntentFields(operation, requestBody, intent);
-
-        // 7. Construir el cuerpo tipado y mostrarlo: es lo que permite al operador
-        //    verificar el tipado antes de que salga. No lleva credencial alguna
-        const v2RequestBody = this.requestBuilder.buildRequestBody(operation, requestBody);
+        // 5. Construir el cuerpo v2 según la operación y mostrarlo: es lo que
+        //    permite al operador verificar lo que sale antes de que salga (el
+        //    tipado en el cálculo, la proyección en la cancelación). No lleva
+        //    credencial alguna
+        const v2RequestBody = this._buildV2Body(operation, requestBody);
         console.log(`Cuerpo v2 a enviar: ${JSON.stringify(v2RequestBody, null, 2)}`);
 
-        // 8. Guardia de cableado. No es un andamio: el cliente v2 ya se inyecta
+        // 6. Guardia de cableado. No es un andamio: el cliente v2 ya se inyecta
         //    desde index.js y en operación normal esta condición es falsa; queda
         //    como defensa permanente contra un cableado incompleto en index.js
         if (!this.synexusApiClient) {
@@ -258,10 +253,58 @@ class TaxCommandHandler {
             throw new Error(errorMsg);
         }
 
-        // 9. Emitir la petición con el cuerpo construido y la entidad resuelta. El
+        // 7. Emitir la petición con el cuerpo construido y la entidad resuelta. El
         //    valor de retorno viaja al paso 7 de execute, que guarda la respuesta
         //    con el mismo mecanismo de siempre: el contrato de archivos no cambia
         return await this.synexusApiClient.makeRequest(operation, v2RequestBody, resolvedEntityCode);
+    }
+
+    /**
+     * Construye el cuerpo v2 según la operación. Dos caminos, uno por forma de
+     * cuerpo del contrato:
+     *   - cancel_tax: la proyección { invoice_id, customer_id } del builder.
+     *   - get_tax y post_tax: intención → validar el archivo contra ESA misma
+     *     intención → construir el cuerpo tipado (la secuencia del plan 01-03).
+     *
+     * La cancelación no pasa por getIntentFor ni por validateV2IntentFields
+     * porque no tiene intención que mapear ni que validar: su endpoint no
+     * documenta transaction_type ni committed. Las guardias de archivo v1 y de
+     * arreglo raíz sí le aplican: ya corrieron en validateV2FileShape (paso 2
+     * de _executeV2), común a las tres operaciones.
+     *
+     * Sigue el molde de getIntentFor: comprobación por operación y throw
+     * terminal, SIN rama else con valor por omisión. validateOperation ya corrió
+     * en el paso 2 de execute, así que la rama terminal sólo dispara si alguien
+     * amplía validOperations sin dar a la operación nueva un constructor de
+     * cuerpo: mejor abortar aquí que mandar un cuerpo de cálculo a un endpoint
+     * que no lo espera
+     * @private
+     * @param {string} operation - Operación ya validada
+     * @param {Object} requestBody - Cuerpo CRUDO, ya validado en forma
+     * @returns {Object} Cuerpo listo para emitirse
+     * @throws {Error} Si la operación no tiene constructor de cuerpo, si el archivo contradice la
+     *   intención (cálculo) o si falta invoice_id o customer_id (cancelación)
+     */
+    _buildV2Body(operation, requestBody) {
+        if (operation === 'cancel_tax') {
+            return this.requestBuilder.buildCancelBody(requestBody);
+        }
+
+        if (operation === 'get_tax' || operation === 'post_tax') {
+            // La intención primero: una operación sin mapeo aborta aquí, antes
+            // de que se valide o se construya nada. Después, validar antes de
+            // construir: un archivo que contradice la operación aborta antes de
+            // que exista un cuerpo. La intención que se compara es la MISMA que
+            // devolvió el builder: una sola fuente
+            const intent = this.requestBuilder.getIntentFor(operation);
+            this.validator.validateV2IntentFields(operation, requestBody, intent);
+            return this.requestBuilder.buildRequestBody(operation, requestBody);
+        }
+
+        const errorMsg = `La operación "${operation}" no tiene constructor de cuerpo en el contrato v2.`;
+        console.error(errorMsg);
+        this.logger.error(`${errorMsg} - Operation: ${operation}`);
+        throw new Error(errorMsg);
     }
 
     /**
