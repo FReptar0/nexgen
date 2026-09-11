@@ -4,10 +4,12 @@ const crypto = require('crypto');
 /**
  * API Layer - Synexus Request Builder (contrato v2)
  * Responsabilidad: Construir el cuerpo de la petición v2 a partir del archivo
- * del ERP y de la operación invocada. nexgen es dueño de los tres campos de
- * intención —transaction_type, committed y request_id— para las DOS operaciones
- * de cálculo (get_tax y post_tax) y los pone a partir de la operación; nunca
- * los hereda del archivo de entrada
+ * del ERP y de la operación invocada. Hay DOS formas de cuerpo:
+ *   - Cálculo (get_tax y post_tax, buildRequestBody): el archivo entero más
+ *     los tres campos de intención —transaction_type, committed y request_id—
+ *     que nexgen pone a partir de la operación y nunca hereda del archivo.
+ *   - Cancelación (cancel_tax, buildCancelBody): una PROYECCIÓN de dos campos
+ *     del archivo, { invoice_id, customer_id }, sin intención y sin llave.
  * Principio SOLID: Single Responsibility Principle (SRP)
  * Patrón: Dependency Injection
  *
@@ -18,7 +20,7 @@ const crypto = require('crypto');
  * sales_estimate; y una confirmación sólo registra la factura si va tipada
  * como sales_invoice Y confirmada. Las dos intenciones son opuestas en los dos
  * campos, van al mismo endpoint, y se deciden aquí y en ningún otro sitio.
- * cancel_tax no pasa por este mapeo: va a otro endpoint con otro cuerpo.
+ * cancel_tax no pasa por ese mapeo: va a otro endpoint con otro cuerpo.
  */
 class SynexusRequestBuilder {
     /**
@@ -101,6 +103,60 @@ class SynexusRequestBuilder {
         this._assertIntentFieldsPresent(body);
 
         console.log(`Cuerpo v2 construido para ${operation}: ${body.transaction_type}, committed=${body.committed}, request_id=${body.request_id}`);
+        return body;
+    }
+
+    /**
+     * Construye el cuerpo de la cancelación v2 (OPER-03): una PROYECCIÓN de
+     * exactamente dos campos del archivo del ERP, { invoice_id, customer_id },
+     * en un objeto NUEVO. Ningún otro campo del archivo viaja; el argumento
+     * nunca se muta.
+     *
+     * Por qué proyectar y no pasar el archivo entero: el archivo del ERP tiene
+     * forma de cálculo (cart, direcciones, entity_id) y el endpoint de
+     * cancelación documenta exactamente esos dos campos, sin decir qué hace con
+     * los extra. Mandar sólo lo documentado es lo único que respeta el contrato
+     * tal como está escrito. No es traducir esquemas —los dos nombres son los
+     * del contrato v2—; es elegir qué mandar.
+     *
+     * Por qué NO lleva request_id (excepción acotada de SAFE-01): el campo no
+     * está documentado para este endpoint y CLAUDE.md prohíbe inventar campos.
+     * La cancelación es idempotente por naturaleza: repetirla sobre una factura
+     * ya cancelada devuelve 404/422 sin doble efecto, y el 409 de este endpoint
+     * está documentado como seguro de reintentar. Tampoco lleva transaction_type
+     * ni committed: no hay intención que declarar, así que no pasa por
+     * getIntentFor ni genera llave. Sólo se exige presencia, no tipo: nexgen no
+     * valida el esquema del ERP, sólo que los dos campos del contrato estén
+     * @param {Object} requestBody - Cuerpo ya validado en forma, tal como lo dejó el ERP
+     * @returns {{ invoice_id: *, customer_id: * }} Objeto nuevo con exactamente esas dos llaves
+     * @throws {Error} Si invoice_id o customer_id es undefined, null o cadena vacía, nombrando el o los que faltan
+     */
+    buildCancelBody(requestBody) {
+        // 1. Presencia de los dos campos del contrato. Ausente = undefined, null
+        //    o cadena vacía; se recolectan todos los que falten para nombrarlos
+        //    juntos, como hace _validateRequiredEnvVars con las variables
+        const missingFields = ['invoice_id', 'customer_id'].filter(field => {
+            const value = requestBody[field];
+            return value === undefined || value === null || value === '';
+        });
+
+        if (missingFields.length > 0) {
+            const errorMsg = 'Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y "customer_id"; ' +
+                `falta(n): ${missingFields.join(', ')}. La cancelación aborta antes de emitir petición alguna.`;
+            console.error(errorMsg);
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
+        // 2. La proyección: exactamente dos llaves, en un objeto nuevo. Sin
+        //    esparcir el archivo: cualquier campo extra que se colara aquí
+        //    saldría al cable sin estar documentado
+        const body = {
+            invoice_id: requestBody.invoice_id,
+            customer_id: requestBody.customer_id
+        };
+
+        console.log(`Cuerpo v2 de cancelación construido: invoice_id=${body.invoice_id}, customer_id=${body.customer_id}`);
         return body;
     }
 

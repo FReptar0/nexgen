@@ -377,6 +377,9 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         expect(caught).not.toBeNull();
         expect(caught.message.startsWith(cancelMessagePrefix)).toBe(true);
         expect(caught.message).toContain('invoice_id');
+        // La lista de faltantes, literal: los dos nombres también aparecen en
+        // la parte fija del mensaje, así que "contiene invoice_id" no basta
+        expect(caught.message).toContain('falta(n): invoice_id.');
     });
 
     it('sin customer_id lanza nombrando customer_id', () => {
@@ -384,7 +387,7 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         delete input.customer_id;
 
         expect(() => builder.buildCancelBody(input)).toThrow(cancelMessagePrefix);
-        expect(() => builder.buildCancelBody(input)).toThrow('customer_id');
+        expect(() => builder.buildCancelBody(input)).toThrow('falta(n): customer_id.');
     });
 
     it('sin los dos, el mensaje nombra los dos', () => {
@@ -400,8 +403,7 @@ describe('buildCancelBody — la cancelación es una proyección de dos campos (
         }
 
         expect(caught).not.toBeNull();
-        expect(caught.message).toContain('invoice_id');
-        expect(caught.message).toContain('customer_id');
+        expect(caught.message).toContain('falta(n): invoice_id, customer_id.');
     });
 
     it('invoice_id vacío ("") cuenta como ausente', () => {

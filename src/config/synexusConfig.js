@@ -10,10 +10,11 @@
 
 /**
  * Configuration Layer - Synexus Config (contrato v2)
- * Responsabilidad: Centralizar la configuración del contrato v2 y aplicar los
- * frenos de arranque —variables requeridas, forma de SYNEXUS_BASE_URL (sólo
- * https y host) y correspondencia llave↔host— al construirse, antes de que
- * exista petición alguna
+ * Responsabilidad: Centralizar la configuración del contrato v2 —incluidas
+ * las dos rutas del proveedor: cálculo y cancelación— y aplicar los frenos de
+ * arranque —variables requeridas, forma de SYNEXUS_BASE_URL (sólo https y
+ * host) y correspondencia llave↔host— al construirse, antes de que exista
+ * petición alguna
  * Principio SOLID aplicado: Single Responsibility Principle (SRP)
  *
  * A diferencia de src/config/index.js, este módulo exporta la CLASE y no una
@@ -34,6 +35,11 @@ class SynexusConfig {
         // Ruta canónica de cálculo según la referencia de API. Sin el alias
         // /calculate: sólo este fragmento es literal, el host sale de configuración.
         this.calculationPath = '/api/v1/tax_calculations';
+
+        // Ruta de cancelación según la referencia de API, sección "Cancel a
+        // Transaction". Otro endpoint que el de cálculo, con otro cuerpo. Igual
+        // que arriba: sólo la ruta es literal, el host sale de configuración.
+        this.cancelPath = '/api/v1/invoices/cancel';
 
         this._validateRequiredEnvVars();
         this._validateKeyHostMatch();
@@ -192,6 +198,19 @@ class SynexusConfig {
      */
     getCalculationUrl() {
         return `${this._getConfiguredUrl().origin}${this.calculationPath}`;
+    }
+
+    /**
+     * Compone la URL de cancelación: host de configuración + ruta de cancelación
+     * (CONN-04, OPER-03). Mismo molde que getCalculationUrl: parte del origin de
+     * la URL ya validada, así que una barra final en la variable no produce
+     * barra doble y nada de lo que _getConfiguredUrl rechaza puede colarse.
+     * El cliente v2 pide esta URL o la de cálculo según la operación; este
+     * módulo es el único que conoce las rutas
+     * @returns {string} URL completa del endpoint de cancelación
+     */
+    getCancelUrl() {
+        return `${this._getConfiguredUrl().origin}${this.cancelPath}`;
     }
 
     /**
