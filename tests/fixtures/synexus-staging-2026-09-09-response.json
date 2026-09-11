@@ -1,0 +1,93 @@
+{
+  "transaction": {
+    "invoice_id": "DEMO-001",
+    "customer_id": "CUST-1",
+    "entity_id": 635,
+    "client_id": "E635",
+    "outlet_id": null,
+    "license_code": null,
+    "facility_number": null,
+    "transaction_date": "2026-09-09T21:31:35Z",
+    "committed": false,
+    "pickup": false,
+    "test_transaction": false,
+    "transaction_purpose": "invoice",
+    "transaction_type": "sales_invoice"
+  },
+  "origin": {
+    "address_line1": null,
+    "address_line2": null,
+    "city": null,
+    "state": null,
+    "zip": null
+  },
+  "destination": {
+    "address_line1": null,
+    "address_line2": null,
+    "city": null,
+    "state": "TX",
+    "zip": "75001",
+    "county": null,
+    "plus4": null,
+    "country": null
+  },
+  "totals": {
+    "tax_rate": "0.0",
+    "pre_tax_amount": "49.99",
+    "taxable_amount": "49.99",
+    "tax_amount": "0.00",
+    "total": "49.99",
+    "discount_amount": "0.00",
+    "invoice_discount_percent": 0,
+    "amount_subject_to_discount": "0.00",
+    "invoice_discount_amount": "0.00",
+    "shipping_cost": "0.00",
+    "shipping_tax": "0.00",
+    "fees": {},
+    "total_fees": "0.00",
+    "exemption": {
+      "source": "no_nexus",
+      "scope": ["all"],
+      "reason_code": "no_nexus"
+    }
+  },
+  "cart": [
+    {
+      "item_id": "SKU-1",
+      "tax_code": "TPP",
+      "price": "49.99",
+      "quantity": 1,
+      "exempt": false,
+      "seq_no": null,
+      "line_type": "item",
+      "discount_percent": 0,
+      "discountable": false,
+      "discount_amount": "0.00",
+      "taxable_amount": "49.99",
+      "tax_rate": null,
+      "tax_amount": "0.00",
+      "exemption": {
+        "source": "no_nexus",
+        "scope": ["all"],
+        "reason_code": "no_nexus"
+      }
+    }
+  ],
+  "warnings": [],
+  "meta": {
+    "trace": {
+      "engine_version": "5.4.4",
+      "calculated_at": "2026-09-09T21:31:35Z",
+      "invoice_id": "DEMO-001",
+      "client_id": null,
+      "integration_profile": "generic",
+      "tax_point_date": "2026-09-09T21:31:35Z",
+      "tax_point_date_source": "defaulted",
+      "tax_state_used": "TX",
+      "tax_state_source": "to_state",
+      "tax_zip_used": "75001",
+      "tax_zip_source": "to_zip"
+    },
+    "request_id": "15ee45f1-7ad4-4283-98b6-672708466ef7"
+  }
+}

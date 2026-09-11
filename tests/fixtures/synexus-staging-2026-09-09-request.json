@@ -1,0 +1,14 @@
+{
+  "invoice_id": "DEMO-001",
+  "customer_id": "CUST-1",
+  "to_state": "TX",
+  "to_zip": "75001",
+  "cart": [
+    {
+      "item_id": "SKU-1",
+      "price": 49.99,
+      "quantity": 1,
+      "tax_code": "TPP"
+    }
+  ]
+}
