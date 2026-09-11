@@ -1,8 +1,9 @@
 // tests/synexusApiClient.test.js
 // El cliente HTTP del contrato v2 (src/api/synexusApiClient.js): método,
-// URL, headers y —sobre todo— que la llave portadora no se filtre por ninguna
-// vía de consola, ni en el camino feliz ni en el de error (CONN-01, CONN-02,
-// CONN-03, CFG-05).
+// URL por operación (cálculo para get_tax/post_tax, cancelación para
+// cancel_tax, sin rama por omisión), headers y —sobre todo— que la llave
+// portadora no se filtre por ninguna vía de consola, ni en el camino feliz
+// ni en el de error (CONN-01, CONN-02, CONN-03, CONN-04, CFG-05, OPER-03).
 //
 // src/api/taxApiClient.js es el molde del que se copió este cliente y está
 // CONGELADO: aquí no se prueba nada de v1 (eso es tests/v1Freeze.wire.test.js).
@@ -22,6 +23,7 @@ const fakes = require('./helpers/fakes');
 // cadena única: la prueba de fuga busca que NUNCA aparezca completa.
 const apiKey = 'synexus_test_llave-ficticia-de-prueba-0000-9999';
 const calculationUrl = 'https://compute.staging.synexustax.com/api/v1/tax_calculations';
+const cancelUrl = 'https://compute.staging.synexustax.com/api/v1/invoices/cancel';
 const entityCode = 'USA';
 
 // Cuerpo YA construido por SynexusRequestBuilder: el cliente no lo toca.
@@ -38,8 +40,16 @@ const createRequestBody = () => ({
     request_id: '11111111-1111-4111-8111-111111111111'
 });
 
+// Cuerpo de cancelación YA proyectado por SynexusRequestBuilder.buildCancelBody:
+// exactamente dos llaves. El cliente tampoco lo toca.
+const createCancelBody = () => ({
+    invoice_id: 'DEMO-001',
+    customer_id: 'CUST-1'
+});
+
 const createSynexusConfigDouble = () => ({
     getCalculationUrl: jest.fn(() => calculationUrl),
+    getCancelUrl: jest.fn(() => cancelUrl),
     getApiKey: jest.fn(() => apiKey)
 });
 
@@ -203,6 +213,112 @@ describe('SynexusApiClient — la llamada a axios (CONN-01, CONN-02, CONN-03)', 
     it('el nombre del header de entidad es una propiedad de instancia, sustituible desde una prueba', () => {
         const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
         expect(client.entityHeaderName).toBe('X-Synexus-Entity');
+    });
+});
+
+describe('SynexusApiClient — el endpoint por operación (OPER-03)', () => {
+    // La URL sale de SynexusConfig según la operación (CONN-04): el cliente no
+    // compone rutas ni conoce la cadena invoices/cancel. Mandar una
+    // cancelación a la ruta de cálculo (o al revés) confundiría al proveedor
+    // con un cuerpo válido para otra cosa; por eso no hay rama por omisión.
+    it('cancel_tax llama a axios con la URL de cancelación: getCancelUrl una vez y getCalculationUrl ninguna', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
+        const synexusConfig = createSynexusConfigDouble();
+        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+
+        await client.makeRequest('cancel_tax', createCancelBody(), entityCode);
+
+        expect(axios).toHaveBeenCalledTimes(1);
+        expect(axios.mock.calls[0][0].url).toBe(cancelUrl);
+        expect(synexusConfig.getCancelUrl).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.getCalculationUrl).not.toHaveBeenCalled();
+    });
+
+    it('get_tax va a la URL de cálculo y no consulta getCancelUrl', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
+        const synexusConfig = createSynexusConfigDouble();
+        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+
+        await client.makeRequest('get_tax', createRequestBody(), entityCode);
+
+        expect(axios.mock.calls[0][0].url).toBe(calculationUrl);
+        expect(synexusConfig.getCalculationUrl).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.getCancelUrl).not.toHaveBeenCalled();
+    });
+
+    it('post_tax va a la MISMA URL de cálculo que get_tax y no consulta getCancelUrl', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
+        const synexusConfig = createSynexusConfigDouble();
+        const client = new SynexusApiClient(synexusConfig, fakes.createFakeLogger());
+
+        await client.makeRequest('post_tax', createRequestBody(), entityCode);
+
+        expect(axios.mock.calls[0][0].url).toBe(calculationUrl);
+        expect(synexusConfig.getCalculationUrl).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.getCancelUrl).not.toHaveBeenCalled();
+    });
+
+    it('una operación desconocida lanza en español nombrándola ANTES de llamar a axios, con el trío', async () => {
+        const logger = fakes.createFakeLogger();
+        const synexusConfig = createSynexusConfigDouble();
+        const client = new SynexusApiClient(synexusConfig, logger);
+
+        let caught = null;
+        try {
+            await client.makeRequest('lo_que_sea', createRequestBody(), entityCode);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message).toContain('"lo_que_sea"');
+        expect(caught.message).toContain('endpoint');
+        expect(caught.message).toContain('contrato v2');
+        expect(axios).not.toHaveBeenCalled();
+        expect(synexusConfig.getCalculationUrl).not.toHaveBeenCalled();
+        expect(synexusConfig.getCancelUrl).not.toHaveBeenCalled();
+        expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+        expect(consoleErrorSpy).toHaveBeenCalledWith(caught.message);
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        expect(logger.error.mock.calls[0][0]).toContain('lo_que_sea');
+    });
+
+    describe('la cancelación viaja con el mismo molde que el cálculo', () => {
+        let cancelBody;
+        let axiosCallArgument;
+
+        beforeEach(async () => {
+            axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
+            cancelBody = createCancelBody();
+            const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+            await client.makeRequest('cancel_tax', cancelBody, entityCode);
+            axiosCallArgument = axios.mock.calls[0][0];
+        });
+
+        it('método POST', () => {
+            expect(axiosCallArgument.method).toBe('POST');
+        });
+
+        it('exactamente los tres headers de siempre: Content-Type, Authorization: Bearer y X-Synexus-Entity', () => {
+            expect(axiosCallArgument.headers).toEqual({
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+                'X-Synexus-Entity': entityCode
+            });
+        });
+
+        it('data es el cuerpo recibido por identidad: el cliente no proyecta ni añade nada', () => {
+            expect(axiosCallArgument.data).toBe(cancelBody);
+            expect(axiosCallArgument.data).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+        });
+
+        it('timeout 30000 ms', () => {
+            expect(axiosCallArgument.timeout).toBe(30000);
+        });
+
+        it('la traza nombra la operación en mayúsculas y la URL de cancelación', () => {
+            expect(consoleLogSpy).toHaveBeenCalledWith(`Realizando petición CANCEL_TAX a: ${cancelUrl}`);
+        });
     });
 });
 
@@ -476,7 +592,7 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
     });
 });
 
-describe('SynexusApiClient — envoltorio getTax', () => {
+describe('SynexusApiClient — envoltorios getTax, postTax y cancelTax', () => {
     it('getTax(requestBody, entityCode) delega en makeRequest con la operación get_tax', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
         const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
@@ -490,9 +606,37 @@ describe('SynexusApiClient — envoltorio getTax', () => {
         expect(result).toEqual({ total_tax: '0.00' });
     });
 
-    it('no ofrece postTax ni cancelTax: son de la Fase 2', () => {
+    it('postTax(requestBody, entityCode) delega en makeRequest con la operación post_tax', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { total_tax: '0.00' }));
         const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
-        expect(client.postTax).toBeUndefined();
-        expect(client.cancelTax).toBeUndefined();
+        const makeRequestSpy = jest.spyOn(client, 'makeRequest');
+        const requestBody = createRequestBody();
+
+        const result = await client.postTax(requestBody, entityCode);
+
+        expect(makeRequestSpy).toHaveBeenCalledTimes(1);
+        expect(makeRequestSpy).toHaveBeenCalledWith('post_tax', requestBody, entityCode);
+        expect(result).toEqual({ total_tax: '0.00' });
+    });
+
+    it('cancelTax(requestBody, entityCode) delega en makeRequest con la operación cancel_tax', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, { message: 'Invoice cancelled' }));
+        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        const makeRequestSpy = jest.spyOn(client, 'makeRequest');
+        const cancelBody = createCancelBody();
+
+        const result = await client.cancelTax(cancelBody, entityCode);
+
+        expect(makeRequestSpy).toHaveBeenCalledTimes(1);
+        expect(makeRequestSpy).toHaveBeenCalledWith('cancel_tax', cancelBody, entityCode);
+        expect(axios.mock.calls[0][0].url).toBe(cancelUrl);
+        expect(result).toEqual({ message: 'Invoice cancelled' });
+    });
+
+    it('ofrece los tres envoltorios: getTax, postTax y cancelTax son funciones', () => {
+        const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+        expect(typeof client.getTax).toBe('function');
+        expect(typeof client.postTax).toBe('function');
+        expect(typeof client.cancelTax).toBe('function');
     });
 });

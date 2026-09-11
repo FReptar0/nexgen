@@ -11,6 +11,10 @@
 //      validateCommittedField y, desde WR-03, sanitizeStringFields: el cuerpo
 //      viaja CRUDO), y que termina emitiendo con el cliente v2 —o en la
 //      guardia de cableado si ese cliente no se inyectó.
+//   4. La bifurcación de _buildV2Body por operación (OPER-03): get_tax y
+//      post_tax pasan por intención → validar intención → construir;
+//      cancel_tax va directo a buildCancelBody sin consultar getIntentFor ni
+//      validateV2IntentFields; y no hay rama por omisión.
 //
 // Ningún archivo de prueba requiere index.js (ejecuta main() al cargarse).
 const TaxValidator = require('../src/validators/taxValidator');
@@ -385,7 +389,8 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
 
     /**
      * Arma el manejador con el validador real espiado y dobles literales para
-     * el resto. requestBuilder es un doble con getIntentFor y buildRequestBody;
+     * el resto. requestBuilder es un doble con getIntentFor, buildRequestBody y
+     * buildCancelBody (la proyección de dos llaves del plan 02-02);
      * synexusApiClient es un doble con makeRequest (octavo colaborador desde el
      * plan 01-04), sustituible por null para probar la guardia de cableado.
      * @param {*} requestBody - Lo que readJsonFile devolverá
@@ -424,7 +429,8 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
                 transaction_type: 'sales_estimate',
                 committed: false,
                 request_id: '22222222-2222-4222-8222-222222222222'
-            }))
+            })),
+            buildCancelBody: jest.fn(body => ({ invoice_id: body.invoice_id, customer_id: body.customer_id }))
         }, builderOverrides || {});
         const synexusApiClient = settings.synexusApiClient !== undefined
             ? settings.synexusApiClient
@@ -617,22 +623,26 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
-    it('con una operación sin mapeo, getIntentFor aborta antes de validar la intención y de construir nada', async () => {
-        // El doble lanza como lo hace el builder real con cancel_tax en este
-        // plan: no pasa por el mapeo de intención (el plan 02-02 le da su
-        // propio constructor). post_tax ya no sirve de ejemplo: tiene mapeo.
-        const noMappingMessage = 'La operación "cancel_tax" no pasa por el mapeo de intención del contrato v2';
+    it('cancel_tax nunca consulta getIntentFor: con un doble que LANZA en getIntentFor, la cancelación igual llega al cliente', async () => {
+        // Hasta el plan 02-01 este caso afirmaba que cancel_tax abortaba en
+        // getIntentFor. Desde el plan 02-02 la cancelación tiene su propio
+        // constructor y el mapeo de intención no se consulta: si el manejador
+        // volviera a mandarla por la rama de cálculo, este doble la haría
+        // abortar y el caso se pondría en rojo.
+        const noMappingMessage = 'La operación "cancel_tax" no tiene mapeo de intención en el contrato v2';
         const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(createV2Body(), {
             getIntentFor: jest.fn(() => { throw new Error(noMappingMessage); })
         });
 
-        await expect(handler.execute(['cancel_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('cancel_tax');
+        await expect(handler.execute(['cancel_tax', 'a.json', '--api-version=v2'])).resolves.toBeUndefined();
 
-        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('cancel_tax');
+        expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
         expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+        expect(requestBuilder.buildCancelBody).toHaveBeenCalledTimes(1);
         expect(spies.validate).not.toHaveBeenCalled();
-        expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+        expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+        expect(synexusApiClient.makeRequest.mock.calls[0][0]).toBe('cancel_tax');
     });
 
     it('con readJsonFile devolviendo null, falla en validateRequestBody (que va primero), no comprueba la forma y no consulta la intención', async () => {
@@ -644,6 +654,155 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+    });
+
+    describe('la rama de cancelación: _buildV2Body bifurca por operación (OPER-03)', () => {
+        const runCancelV2 = (handler) => handler.execute(['cancel_tax', 'a.json', '--api-version=v2']);
+
+        it('cancel_tax con un archivo v2 va a buildCancelBody y al cliente v2; getIntentFor y validateV2IntentFields con CERO llamadas', async () => {
+            const rawBody = createV2Body();
+            const { handler, spies, apiClient, requestBuilder, synexusApiClient } = buildHandler(rawBody);
+
+            await expect(runCancelV2(handler)).resolves.toBeUndefined();
+
+            // La cancelación no tiene intención que mapear ni que validar
+            expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
+            expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+            expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+
+            // Lo de v1 tampoco
+            expect(spies.validate).not.toHaveBeenCalled();
+            expect(spies.validateCommittedField).not.toHaveBeenCalled();
+            expect(spies.sanitizeStringFields).not.toHaveBeenCalled();
+            expect(apiClient.makeRequest).not.toHaveBeenCalled();
+
+            // buildCancelBody una vez con el cuerpo crudo por identidad
+            expect(requestBuilder.buildCancelBody).toHaveBeenCalledTimes(1);
+            expect(requestBuilder.buildCancelBody).toHaveBeenCalledWith(rawBody);
+            expect(requestBuilder.buildCancelBody.mock.calls[0][0]).toBe(rawBody);
+
+            // El cliente recibe la proyección por identidad y la entidad resuelta
+            const projection = requestBuilder.buildCancelBody.mock.results[0].value;
+            expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+            expect(synexusApiClient.makeRequest).toHaveBeenCalledWith('cancel_tax', projection, 'USA');
+            expect(synexusApiClient.makeRequest.mock.calls[0][1]).toBe(projection);
+            expect(Object.keys(projection).sort()).toEqual(['customer_id', 'invoice_id']);
+        });
+
+        it('el orden de la cancelación: validateRequestBody → validateV2FileShape → resolveEntityCode → printProfile → buildCancelBody → makeRequest', async () => {
+            const { handler, spies, synexusConfig, requestBuilder, synexusApiClient } = buildHandler(createV2Body());
+
+            await expect(runCancelV2(handler)).resolves.toBeUndefined();
+
+            expect(spies.validateRequestBody).toHaveBeenCalledTimes(1);
+            expect(spies.validateV2FileShape).toHaveBeenCalledTimes(1);
+            expect(synexusConfig.resolveEntityCode).toHaveBeenCalledTimes(1);
+            expect(synexusConfig.printProfile).toHaveBeenCalledTimes(1);
+
+            const order = [
+                spies.validateRequestBody,
+                spies.validateV2FileShape,
+                synexusConfig.resolveEntityCode,
+                synexusConfig.printProfile,
+                requestBuilder.buildCancelBody,
+                synexusApiClient.makeRequest
+            ].map(fn => fn.mock.invocationCallOrder[0]);
+            const sorted = [...order].sort((a, b) => a - b);
+            expect(order).toEqual(sorted);
+        });
+
+        it('imprime "Cuerpo v2 a enviar:" una vez con la proyección en JSON a dos espacios, después de buildCancelBody y antes de makeRequest', async () => {
+            const { handler, requestBuilder, synexusApiClient } = buildHandler(createV2Body());
+
+            await expect(runCancelV2(handler)).resolves.toBeUndefined();
+
+            const projection = requestBuilder.buildCancelBody.mock.results[0].value;
+            const traceCalls = consoleLogSpy.mock.calls
+                .map((call, index) => ({ call, index }))
+                .filter(entry => typeof entry.call[0] === 'string' && entry.call[0].startsWith(bodyTracePrefix));
+
+            expect(traceCalls).toHaveLength(1);
+            expect(traceCalls[0].call).toHaveLength(1);
+            expect(traceCalls[0].call[0]).toBe(`${bodyTracePrefix} ${JSON.stringify(projection, null, 2)}`);
+            expect(traceCalls[0].call[0]).toContain('"invoice_id": "DEMO-001"');
+            expect(traceCalls[0].call[0]).not.toContain('transaction_type');
+            expect(traceCalls[0].call[0]).not.toContain('request_id');
+
+            const traceOrder = consoleLogSpy.mock.invocationCallOrder[traceCalls[0].index];
+            expect(traceOrder).toBeGreaterThan(requestBuilder.buildCancelBody.mock.invocationCallOrder[0]);
+            expect(traceOrder).toBeLessThan(synexusApiClient.makeRequest.mock.invocationCallOrder[0]);
+        });
+
+        it('un archivo v1 (Committed: true) bajo cancel_tax v2 lanza "parece del contrato v1"; buildCancelBody y makeRequest no se llaman', async () => {
+            const { handler, spies, requestBuilder, synexusConfig, synexusApiClient } = buildHandler({ Committed: true, cartID: 'CART-1' });
+
+            await expect(runCancelV2(handler)).rejects.toThrow(v1FileGuardMessage);
+
+            expect(spies.validateV2FileShape).toHaveBeenCalledTimes(1);
+            expect(synexusConfig.resolveEntityCode).not.toHaveBeenCalled();
+            expect(requestBuilder.buildCancelBody).not.toHaveBeenCalled();
+            expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+        });
+
+        it('un arreglo raíz bajo cancel_tax v2 lanza "no un arreglo"; buildCancelBody y makeRequest no se llaman (WR-04)', async () => {
+            const { handler, requestBuilder, synexusApiClient, fileManager } = buildHandler([createV2Body()]);
+
+            await expect(runCancelV2(handler)).rejects.toThrow('no un arreglo');
+
+            expect(requestBuilder.buildCancelBody).not.toHaveBeenCalled();
+            expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+            expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+        });
+
+        it('si buildCancelBody lanza (falta invoice_id), makeRequest no se llama, no se imprime la traza del cuerpo y no se escribe archivo', async () => {
+            const missingMessage = 'Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y "customer_id"; falta(n): invoice_id.';
+            const { handler, requestBuilder, synexusApiClient, fileManager } = buildHandler(createV2Body(), {
+                buildCancelBody: jest.fn(() => { throw new Error(missingMessage); })
+            });
+
+            await expect(runCancelV2(handler)).rejects.toThrow('invoice_id');
+
+            expect(requestBuilder.buildCancelBody).toHaveBeenCalledTimes(1);
+            expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+            expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(false);
+            expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+        });
+
+        it('la respuesta de cancelación viaja por identidad al mismo _saveResponse que el cálculo', async () => {
+            const cancelResponse = { message: 'Invoice cancelled', updated_invoices: 1, invoice_id: 'DEMO-001', client_id: 'E635', entity_id: 635 };
+            const { handler, fileManager } = buildHandler(createV2Body(), {}, {
+                synexusApiClient: { makeRequest: jest.fn(async () => cancelResponse) }
+            });
+
+            await expect(runCancelV2(handler)).resolves.toBeUndefined();
+
+            expect(fileManager.writeJsonFile).toHaveBeenCalledTimes(1);
+            expect(fileManager.writeJsonFile.mock.calls[0][1]).toBe(cancelResponse);
+        });
+
+        it('_buildV2Body con una operación desconocida lanza en español nombrándola, con el trío y sin rama por omisión', () => {
+            // Defensa: validateOperation ya corrió en el paso 2 de execute, así
+            // que esta rama sólo dispara si alguien amplía validOperations sin
+            // dar a la operación nueva un constructor de cuerpo.
+            const { handler, requestBuilder } = buildHandler(createV2Body());
+
+            let caught = null;
+            try {
+                handler._buildV2Body('lo_que_sea', createV2Body());
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('"lo_que_sea"');
+            expect(caught.message).toContain('contrato v2');
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            expect(consoleErrorSpy).toHaveBeenCalledWith(caught.message);
+            expect(handler.logger.error).toHaveBeenCalledTimes(1);
+            expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
+            expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
+            expect(requestBuilder.buildCancelBody).not.toHaveBeenCalled();
+        });
     });
 
     describe('con el SynexusRequestBuilder real', () => {
@@ -749,6 +908,39 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             expect(caught.message).toContain('debe ser true');
             expect(caught.message).not.toContain(wiringGuardMessage);
             expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+            expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
+        });
+
+        it('cancel_tax con un archivo v2 llega al cliente v2 con exactamente { invoice_id, customer_id }, sin pasar por validateV2IntentFields (OPER-03)', async () => {
+            const { handler, spies, synexusApiClient } = buildRealHandler(createV2Body());
+
+            await expect(handler.execute(['cancel_tax', 'a.json', '--api-version=v2'])).resolves.toBeUndefined();
+
+            const trace = consoleLogSpy.mock.calls.find(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix));
+            expect(trace).toBeDefined();
+            const printedBody = JSON.parse(trace[0].slice(bodyTracePrefix.length));
+            expect(printedBody).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+            expect(spies.validate).not.toHaveBeenCalled();
+            expect(spies.validateCommittedField).not.toHaveBeenCalled();
+            expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+
+            // Lo que se emite es exactamente lo que se imprimió: dos llaves, nada más
+            expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+            const [operation, sentBody, entity] = synexusApiClient.makeRequest.mock.calls[0];
+            expect(operation).toBe('cancel_tax');
+            expect(entity).toBe('USA');
+            expect(sentBody).toEqual({ invoice_id: 'DEMO-001', customer_id: 'CUST-1' });
+            expect(Object.keys(sentBody).sort()).toEqual(['customer_id', 'invoice_id']);
+            expect(sentBody).not.toHaveProperty('request_id');
+        });
+
+        it('cancel_tax con un archivo v2 sin customer_id aborta antes del cliente v2 nombrando customer_id', async () => {
+            const body = createV2Body();
+            delete body.customer_id;
+            const { handler, synexusApiClient } = buildRealHandler(body);
+
+            await expect(handler.execute(['cancel_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('customer_id');
+
             expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
         });
     });
