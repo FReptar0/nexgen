@@ -26,10 +26,10 @@ files_reviewed_list:
   - tests/setup.test.js
 findings:
   critical: 0
-  warning: 5
+  warning: 5          # 3 resueltas (WR-01, WR-02, WR-05) · 2 diferidas a Fase 2 (WR-03, WR-04)
   info: 10
   total: 15
-status: issues_found
+status: resolved_with_deferrals
 ---
 
 # Fase 01: Reporte de revisión de código
@@ -37,7 +37,7 @@ status: issues_found
 **Revisado:** 2026-09-10T22:01:22Z
 **Profundidad:** standard
 **Archivos revisados:** 20
-**Estado:** issues_found
+**Estado:** resolved_with_deferrals — 3 advertencias corregidas, 2 diferidas a Fase 2, 10 informativos sin acción
 
 ## Resumen
 
@@ -77,6 +77,8 @@ Además, el saneado de apóstrofos heredado de v1 corrompe cadenas en el cable v
 ## Advertencias
 
 ### WR-01: Los frenos de arranque validan sólo el hostname: `http://`, ruta, query y userinfo en `SYNEXUS_BASE_URL` pasan
+
+> ✅ **RESUELTO** en `8afd6a6` — `_getConfiguredUrl` parsea una sola vez y rechaza esquema ≠ https, ruta, query, fragmento y userinfo (enmascarado en el mensaje). 8 casos nuevos.
 
 **Archivo:** `src/config/synexusConfig.js:67-88`, `107-118`, `142-145`
 **Problema:** `_validateKeyHostMatch` compara únicamente `new URL(baseUrl).hostname` contra
@@ -121,6 +123,8 @@ Añadir a `tests/synexusConfig.test.js` un caso por fila de la tabla anterior.
 
 ### WR-02: Un flag mal escrito con un solo guion (o guion tipográfico) cae en v1 en silencio
 
+> ✅ **RESUELTO** en `4d4d2ac` — todo argumento que no sea uno de los dos posicionales ni un flag reconocido aborta mostrando los sobrantes y los flags aceptados. La invocación sin flags del ERP no cambia. 12 casos nuevos.
+
 **Archivo:** `src/cli/taxCommandHandler.js:78-89`
 **Problema:** El rechazo de flags desconocidos sólo mira argumentos que empiezan con `--`.
 Cualquier otro argumento es posicional, y el tercer posicional en adelante se ignora sin
@@ -151,6 +155,8 @@ el guion tipográfico) esperando `Argumento no reconocido`.
 
 ### WR-03: El saneado de apóstrofos de v1 se aplica al cable v2 y corrompe las cadenas
 
+> ⏭ **DIFERIDO A FASE 2** — es decisión sobre qué llega al proveedor, y va junto con la fidelidad de la respuesta (SAFE-04/COMP-03). Registrar al planear la Fase 2.
+
 **Archivo:** `src/cli/taxCommandHandler.js:193`; origen en `src/validators/taxValidator.js:139`
 **Problema:** `sanitizeStringFields` sustituye `'` por `\'`. `CLAUDE.md` documenta que esa
 regla nació de fallos en líneas de dirección de la API legada (`Plummer's...`); es un
@@ -174,6 +180,8 @@ fije en el `axios.mock.calls[0][0].data` cómo viaja un apóstrofo bajo v2, para
 decisión quede congelada en vez de implícita.
 
 ### WR-04: Un archivo JSON cuyo raíz es un array atraviesa la rama v2 y se emite como objeto con claves numéricas
+
+> ⏭ **DIFERIDO A FASE 2** — caso borde de baja probabilidad (el ERP produce objetos). Encaja con la validación de forma de la Fase 2.
 
 **Archivo:** `src/cli/taxCommandHandler.js:190`; `src/validators/taxValidator.js:120`; `src/api/synexusRequestBuilder.js:78-80`
 **Problema:** `validateRequestBody` acepta arrays (`typeof [] === 'object'`). Bajo v2,
@@ -201,6 +209,8 @@ if (Array.isArray(requestBody)) {
 ```
 
 ### WR-05: El aislamiento de `tests/setup.js` no cubre las dos variables que borra: un `.env` real las repone al cargar `src/config`
+
+> ✅ **RESUELTO** en `2dd5667` — `setup.js` sustituye `dotenv.config()` por un no-op antes de cualquier `require` de `src/config`. 3 casos nuevos con sonda en tmpdir, verificados por mutación.
 
 **Archivo:** `tests/setup.js:13-32`
 **Problema:** El comentario afirma que "un `.env` real presente en la máquina del
