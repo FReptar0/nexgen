@@ -29,9 +29,11 @@ class TaxCommandHandler {
         this.synexusConfig = synexusConfig;
         this.requestBuilder = requestBuilder;
         this.synexusApiClient = synexusApiClient;
-        // Flags reconocidos por parseArguments. Cualquier otro argumento que
-        // empiece con -- es error: un flag mal escrito que cayera en silencio en
-        // v1 le haría creer al operador que probó v2.
+        // Flags reconocidos por parseArguments. Fuera de los dos posicionales
+        // (operación y ruta), cualquier otro argumento que no sea uno de estos
+        // flags con su valor es error: un flag mal escrito (-api-version=v2, un
+        // guion tipográfico, --api-version sin =) que cayera en silencio en v1
+        // le haría creer al operador que probó v2.
         this.knownFlags = ['--api-version=', '--entity='];
     }
 
@@ -74,19 +76,40 @@ class TaxCommandHandler {
      * @throws {Error} Si los argumentos son inválidos
      */
     parseArguments(args) {
-        // 1. Flags desconocidos: se rechazan antes que nada
-        const unknownFlags = args.filter(arg => arg.startsWith('--') &&
-            !this.knownFlags.some(flag => arg.startsWith(flag)));
-        if (unknownFlags.length > 0) {
-            const errorMsg = `Argumento no reconocido: ${unknownFlags.join(', ')}. ` +
-                'Flags válidos: --api-version=<v1|v2> y --entity=<codigo>.';
+        // 1. Clasificar cada argumento. Sólo hay tres destinos: un flag reconocido
+        //    con su valor, uno de los dos posicionales, o error. Un argumento que
+        //    empieza con guion —ASCII o tipográfico (– —, lo que produce un editor
+        //    que "corrige" el doble guion)— sólo puede ser flag, y si no es uno de
+        //    los reconocidos se rechaza: -api-version=v2 o --api-version sin = no
+        //    pueden caer en v1 en silencio. Un tercer posicional también se rechaza:
+        //    la invocación del envoltorio del ERP trae exactamente dos, así que su
+        //    resultado no cambia (COMP-01).
+        //    Cuenta como guion: el ASCII, los tipográficos U+2010..U+2015
+        //    (‐ ‑ ‒ – — ―) y el signo menos U+2212
+        const looksLikeFlag = /^[-\u2010-\u2015\u2212]/;
+        const positionals = [];
+        const unknownArguments = [];
+        args.forEach(arg => {
+            if (this.knownFlags.some(flag => arg.startsWith(flag))) {
+                return;
+            }
+            if (!looksLikeFlag.test(arg) && positionals.length < 2) {
+                positionals.push(arg);
+                return;
+            }
+            unknownArguments.push(arg);
+        });
+
+        // 2. Argumentos desconocidos: se rechazan antes que nada, mostrando todos
+        //    los que sobran y las dos formas aceptadas
+        if (unknownArguments.length > 0) {
+            const errorMsg = `Argumento no reconocido: ${unknownArguments.join(', ')}. ` +
+                'Sólo se aceptan la operación, la ruta del archivo y los flags ' +
+                '--api-version=<v1|v2> y --entity=<codigo>.';
             console.error(errorMsg);
             this.logger.error(errorMsg);
             throw new Error(errorMsg);
         }
-
-        // 2. Separar los posicionales retirando todo lo que empiece con --
-        const positionals = args.filter(arg => !arg.startsWith('--'));
 
         // 3. Comprobación de longitud sobre los posicionales YA filtrados: si corriera
         //    antes, una invocación con flag y sin ruta pasaría y fallaría más tarde

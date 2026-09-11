@@ -113,6 +113,82 @@ describe('Selector de contrato — parseArguments y resolveApiVersion (CFG-03, C
         expect(logger.error).toHaveBeenCalled();
     });
 
+    describe('fuera de los dos posicionales, todo lo que no sea un flag reconocido con su valor aborta (WR-02)', () => {
+        // Cada forma de esta tabla caía antes en v1 en silencio: el argumento se
+        // trataba como posicional sobrante y se ignoraba, así que un operador con
+        // un archivo v2 veía el mensaje de Committed de v1 y uno con archivo v1
+        // golpeaba la API legada creyendo probar v2.
+        it.each([
+            ['un solo guion', '-api-version=v2'],
+            ['guiones tipográficos en-dash (U+2013)', '––api-version=v2'],
+            ['guiones tipográficos em-dash (U+2014)', '——api-version=v2'],
+            ['un guion tipográfico y uno ASCII', '–-api-version=v2'],
+            ['un flag sin =', '--api-version'],
+            ['--entity sin =', '--entity'],
+            ['un tercer posicional suelto', 'extra']
+        ])('%s (%j) lanza "Argumento no reconocido" mostrando el argumento y los dos flags válidos', (_shape, argument) => {
+            let caught = null;
+            try {
+                handler.parseArguments(['get_tax', 'a.json', argument]);
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('Argumento no reconocido');
+            expect(caught.message).toContain(argument);
+            expect(caught.message).toContain('--api-version=<v1|v2>');
+            expect(caught.message).toContain('--entity=<codigo>');
+            expect(consoleErrorSpy).toHaveBeenCalledWith(caught.message);
+            expect(logger.error).toHaveBeenCalledWith(caught.message);
+        });
+
+        it('el guion tipográfico se rechaza aunque vaya ANTES de los posicionales: no se cuela como operación', () => {
+            let caught = null;
+            try {
+                handler.parseArguments(['––api-version=v2', 'get_tax', 'a.json']);
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('Argumento no reconocido: ––api-version=v2');
+        });
+
+        it('un flag separado de su valor por espacio (--api-version v2) rechaza los dos sobrantes, nombrándolos', () => {
+            let caught = null;
+            try {
+                handler.parseArguments(['get_tax', 'a.json', '--api-version', 'v2']);
+            } catch (error) {
+                caught = error;
+            }
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('--api-version, v2');
+        });
+
+        it('el rechazo va antes que el mensaje de uso: un flag mal escrito sin posicionales no se disfraza de "falta la ruta"', () => {
+            expect(() => handler.parseArguments(['-api-version=v2'])).toThrow('Argumento no reconocido');
+        });
+
+        it('la invocación del envoltorio del ERP (dos posicionales, sin flags) sigue resolviendo v1 sin lanzar (COMP-01)', () => {
+            const parsed = handler.parseArguments(['get_tax', 'a.json']);
+            expect(parsed.operation).toBe('get_tax');
+            expect(parsed.filePath).toBe('a.json');
+            expect(parsed.apiVersion).toBe('v1');
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+            expect(logger.error).not.toHaveBeenCalled();
+        });
+
+        it('los dos flags reconocidos, en cualquier orden, siguen aceptándose junto a los dos posicionales', () => {
+            const parsed = handler.parseArguments(['--entity=USA', 'get_tax', '--api-version=v2', 'a.json']);
+            expect(parsed.operation).toBe('get_tax');
+            expect(parsed.filePath).toBe('a.json');
+            expect(parsed.apiVersion).toBe('v2');
+            expect(parsed.entityCode).toBe('USA');
+        });
+    });
+
     it('--api-version=V2 lanza "Valor inválido", no cae en v1 por omisión', () => {
         expect(() => handler.parseArguments(['get_tax', 'a.json', '--api-version=V2'])).toThrow('Valor inválido');
     });
