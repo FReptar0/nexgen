@@ -390,6 +390,45 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
     });
 });
 
+describe('Recorrido completo — el error de cancelación llega clasificado por status, citando al proveedor y con su request_id (SAFE-05, SAFE-06)', () => {
+    const args = ['cancel_tax', 'c.json', '--api-version=v2', '--entity=USA'];
+
+    it('un 404 { error, message } con X-Request-Id lanza "Error HTTP 404", "no existe", el mensaje del proveedor y request_id=rid-cancel-404; no escribe archivo; la llave no sale', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(
+            404,
+            { error: 'not_found', message: 'Invoice not found' },
+            { 'x-request-id': 'rid-cancel-404' }
+        ));
+        const graph = buildGraph(args, createCancelFile());
+
+        let caught = null;
+        try {
+            await graph.handler.execute(args);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('Error HTTP 404: ')).toBe(true);
+        expect(caught.message).toContain('no existe');
+        expect(caught.message).toContain('Mensaje del proveedor: "Invoice not found"');
+        expect(caught.message).toContain('request_id=rid-cancel-404');
+        expect(caught.message).not.toContain('undefined');
+        expect(axios).toHaveBeenCalledTimes(1);
+        expect(axios.mock.calls[0][0].url).toBe(v2CancelUrl);
+        expect(graph.logger.error.mock.calls.some(call => String(call[0]).includes('rid-cancel-404'))).toBe(true);
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        capturedConsoleOutput().forEach(line => {
+            expect(line).not.toContain(v2ApiKey);
+        });
+        graph.logger.error.mock.calls.forEach(call => {
+            call.forEach(arg => {
+                expect(String(arg)).not.toContain(v2ApiKey);
+            });
+        });
+    });
+});
+
 describe('Recorrido completo — cancel_tax sin selector es el GET de v1 contra CancelTransaction (COMP-01, CFG-03)', () => {
     it('sin flags y sin TAX_API_VERSION: GET, URL exacta de CancelTransaction, sólo Content-Type y el archivo v1 ENTERO (v1 no proyecta)', async () => {
         // Es la invocación literal del envoltorio del ERP. El cliente es el

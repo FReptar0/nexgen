@@ -639,15 +639,59 @@ describe('WR-03 y WR-04 — lo que sale al cable v2 no se escapa y un arreglo no
     });
 });
 
-describe('Recorrido completo — el camino de error del proveedor v2 tampoco filtra la llave', () => {
+describe('Recorrido completo — el camino de error del proveedor v2 tampoco filtra la llave, y llega clasificado por código con su request_id (SAFE-05, SAFE-06)', () => {
     const args = ['get_tax', 'a.json', '--api-version=v2', '--entity=USA'];
 
-    it('con un 422 del proveedor, la corrida lanza "Error HTTP 422", no escribe archivo y la llave no sale por consola', async () => {
-        axios.mockResolvedValue(fakes.createAxiosResponse(422, { error: 'tax_code_missing' }));
+    it('con un 422 tax_code_missing del proveedor, la corrida lanza "Error HTTP 422 (tax_code_missing)" con request_id=rid-422, lo registra, no escribe archivo y la llave no sale', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(422, {
+            error: 'unprocessable',
+            code: 'tax_code_missing',
+            message: 'tax_code is required',
+            request_id: 'rid-422'
+        }));
         const graph = buildGraph(args, createV2Body());
 
-        await expect(graph.handler.execute(args)).rejects.toThrow('Error HTTP 422: ');
+        let caught = null;
+        try {
+            await graph.handler.execute(args);
+        } catch (error) {
+            caught = error;
+        }
 
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('Error HTTP 422 (tax_code_missing): ')).toBe(true);
+        expect(caught.message).toContain('tax_code');
+        expect(caught.message).toContain('Mensaje del proveedor: "tax_code is required"');
+        expect(caught.message).toContain('request_id=rid-422');
+        expect(graph.logger.error.mock.calls.some(call => String(call[0]).includes('rid-422'))).toBe(true);
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        capturedConsoleOutput().forEach(line => {
+            expect(line).not.toContain(v2ApiKey);
+        });
+        graph.logger.error.mock.calls.forEach(call => {
+            call.forEach(arg => {
+                expect(String(arg)).not.toContain(v2ApiKey);
+            });
+        });
+    });
+
+    it('post_tax con un 401 invalid_key lanza "Error HTTP 401 (invalid_key)" nombrando SYNEXUS_API_KEY, sin escribir archivo', async () => {
+        const postArgs = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
+        axios.mockResolvedValue(fakes.createAxiosResponse(401, { error: 'unauthorized', code: 'invalid_key', message: 'Unauthorized' }));
+        const graph = buildGraph(postArgs, createV2Body());
+
+        let caught = null;
+        try {
+            await graph.handler.execute(postArgs);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('Error HTTP 401 (invalid_key): ')).toBe(true);
+        expect(caught.message).toContain('SYNEXUS_API_KEY');
+        expect(caught.message).toContain('Mensaje del proveedor: "Unauthorized"');
+        expect(axios).toHaveBeenCalledTimes(1);
         expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
         capturedConsoleOutput().forEach(line => {
             expect(line).not.toContain(v2ApiKey);

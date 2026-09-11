@@ -2,9 +2,11 @@
 // El cliente HTTP del contrato v2 (src/api/synexusApiClient.js): método,
 // URL por operación (cálculo para get_tax/post_tax, cancelación para
 // cancel_tax, sin rama por omisión), headers, el identificador de petición
-// del proveedor en toda corrida (SAFE-06) y —sobre todo— que la llave
-// portadora no se filtre por ninguna vía de consola, ni en el camino feliz
-// ni en el de error (CONN-01, CONN-02, CONN-03, CONN-04, CFG-05, OPER-03).
+// del proveedor en toda corrida (SAFE-06), la clasificación de errores por
+// código estable —cálculo— y por status —cancelación—, nunca por el texto
+// (SAFE-05), y —sobre todo— que la llave portadora no se filtre por ninguna
+// vía de consola, ni en el camino feliz ni en el de error (CONN-01, CONN-02,
+// CONN-03, CONN-04, CFG-05, OPER-03).
 //
 // src/api/taxApiClient.js es el molde del que se copió este cliente y está
 // CONGELADO: aquí no se prueba nada de v1 (eso es tests/v1Freeze.wire.test.js).
@@ -1007,6 +1009,322 @@ describe('SynexusApiClient — SAFE-06: el identificador de petición del provee
             expect(supportLine()).toBe(`Identificador para soporte: request_id=${noProviderId} (del proveedor)`);
             expect(logger.error.mock.calls[0][0]).toContain(`request_id=${noProviderId} (del proveedor)`);
         });
+    });
+});
+
+describe('SynexusApiClient — SAFE-05: los errores del cálculo se clasifican por su código estable, nunca por el texto', () => {
+    // Los errores de tax_calculations traen { error, code, message, request_id,
+    // details[], warnings[], docs_url }. El cliente ramifica por data.code:
+    // el texto de message lo redacta el proveedor y puede cambiar sin aviso,
+    // así que se cita entre comillas y nunca se interpreta. El código literal
+    // siempre llega al operador, para que pueda buscarlo.
+    const noProviderId = 'no informado por el proveedor';
+
+    /**
+     * Ejecuta makeRequest con axios resolviendo un error de cálculo y devuelve
+     * el error atrapado.
+     * @param {number} status - Status HTTP
+     * @param {Object} data - Cuerpo del error
+     * @param {Object} [headers] - Headers de respuesta (minúsculas)
+     * @param {Object} [logger] - Doble del logger
+     * @param {string} [operation] - get_tax por omisión
+     * @returns {Promise<Error|null>}
+     */
+    const runCalculationError = async (status, data, headers, logger, operation) => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(status, data, headers));
+        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        try {
+            await client.makeRequest(operation || 'get_tax', createRequestBody(), entityCode);
+            return null;
+        } catch (error) {
+            return error;
+        }
+    };
+
+    describe('el catálogo por código: cada uno con su mensaje en español, el código literal y el request_id', () => {
+        it.each([
+            [401, 'invalid_key', 'SYNEXUS_API_KEY'],
+            [422, 'tax_code_missing', 'tax_code'],
+            [409, 'idempotency_key_conflict', 'No se reintenta'],
+            [409, 'invoice_stale_object', 'concurrencia'],
+            [429, 'rate_limited', 'limitó la tasa'],
+            [422, 'cart_empty', 'carrito está vacío'],
+            [422, 'validation_error', 'por validación']
+        ])('%i %s → "Error HTTP <status> (<code>): …", contiene "%s" y request_id=', async (status, code, fragment) => {
+            const logger = fakes.createFakeLogger();
+
+            const caught = await runCalculationError(status, { error: 'x', code: code, request_id: 'rid-cat' }, undefined, logger);
+
+            expect(caught).not.toBeNull();
+            expect(caught.message.startsWith(`Error HTTP ${status} (${code}): `)).toBe(true);
+            expect(caught.message).toContain(fragment);
+            expect(caught.message).toContain('request_id=rid-cat');
+            expect(caught.providerResponded).toBe(true);
+            expect(caught.providerRequestId).toBe('rid-cat');
+            expect(consoleErrorSpy).toHaveBeenCalledWith(caught.message);
+            expect(logger.error.mock.calls[0][0]).toContain(`(${code})`);
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-cat');
+            expect(logger.error.mock.calls[0][0]).toContain('Operation: get_tax');
+        });
+
+        it('post_tax se clasifica igual que get_tax: mismo endpoint, mismo catálogo', async () => {
+            const caught = await runCalculationError(401, { error: 'x', code: 'invalid_key' }, undefined, undefined, 'post_tax');
+
+            expect(caught.message.startsWith('Error HTTP 401 (invalid_key): ')).toBe(true);
+            expect(caught.message).toContain('SYNEXUS_API_KEY');
+            expect(caught.message).toContain(`request_id=${noProviderId}`);
+        });
+
+        it('rate_limited con header retry-after: "Reintente en 30 segundos"', async () => {
+            const caught = await runCalculationError(429, { error: 'x', code: 'rate_limited' }, { 'retry-after': '30' });
+
+            expect(caught.message).toContain('Reintente en 30 segundos');
+            expect(caught.message).not.toContain('unos segundos');
+        });
+
+        it('rate_limited sin header retry-after: "unos segundos"', async () => {
+            const caught = await runCalculationError(429, { error: 'x', code: 'rate_limited' });
+
+            expect(caught.message).toContain('Reintente en unos segundos');
+            expect(caught.message).not.toContain('undefined');
+        });
+
+        it('validation_error con details[]: lista cada detalle — los objetos serializados, las cadenas tal cual', async () => {
+            const caught = await runCalculationError(422, {
+                error: 'x',
+                code: 'validation_error',
+                details: [{ field: 'to_zip', message: 'invalid' }, 'cart[0].tax_code']
+            });
+
+            expect(caught.message).toContain('por validación');
+            expect(caught.message).toContain('"field":"to_zip"');
+            expect(caught.message).toContain('cart[0].tax_code');
+            expect(caught.message).not.toContain('sin detalles');
+        });
+
+        it('validation_error sin details: "sin detalles"', async () => {
+            const caught = await runCalculationError(422, { error: 'x', code: 'validation_error' });
+
+            expect(caught.message).toContain('sin detalles');
+            expect(caught.message).not.toContain('undefined');
+        });
+
+        it('validation_error con details vacío también dice "sin detalles"', async () => {
+            const caught = await runCalculationError(422, { error: 'x', code: 'validation_error', details: [] });
+
+            expect(caught.message).toContain('sin detalles');
+        });
+
+        it('un código desconocido cae al genérico CON el código literal y cita el mensaje del proveedor', async () => {
+            const caught = await runCalculationError(422, { error: 'x', code: 'something_new', message: 'x' });
+
+            expect(caught.message.startsWith('Error HTTP 422 (something_new): ')).toBe(true);
+            expect(caught.message).toContain('El proveedor devolvió el código "something_new"');
+            expect(caught.message).toContain('Mensaje del proveedor: "x"');
+        });
+
+        it('sin code (cuerpo { error: "boom" }): sigue el molde de v1, cuerpo serializado más request_id', async () => {
+            const caught = await runCalculationError(422, { error: 'boom' });
+
+            expect(caught.message).toBe(`Error HTTP 422: {"error":"boom"} - request_id=${noProviderId}`);
+        });
+
+        it('un code que no es cadena (número) tampoco clasifica: molde', async () => {
+            const caught = await runCalculationError(422, { error: 'boom', code: 42 });
+
+            expect(caught.message).toBe(`Error HTTP 422: {"error":"boom","code":42} - request_id=${noProviderId}`);
+        });
+
+        it('el message del proveedor se cita tal cual, entre comillas, para un código conocido', async () => {
+            const caught = await runCalculationError(422, {
+                error: 'x',
+                code: 'tax_code_missing',
+                message: 'tax_code is required on cart[0]'
+            });
+
+            expect(caught.message).toContain('Mensaje del proveedor: "tax_code is required on cart[0]"');
+            expect(caught.message).toContain('Una línea del carrito no trae tax_code');
+        });
+
+        it('sin message del proveedor no hay sufijo "Mensaje del proveedor" ni la cadena undefined', async () => {
+            const caught = await runCalculationError(422, { error: 'x', code: 'tax_code_missing' });
+
+            expect(caught.message).not.toContain('Mensaje del proveedor');
+            expect(caught.message).not.toContain('undefined');
+        });
+
+        it('la llave no sale por consola en un error clasificado', async () => {
+            const caught = await runCalculationError(401, { error: 'x', code: 'invalid_key', message: 'Unauthorized' });
+
+            expect(caught).not.toBeNull();
+            expectNoCredentialLeak();
+            expect(caught.message).not.toContain(apiKey);
+        });
+
+        it('docs_url del cuerpo clasificado va al logger y a ninguna línea de consola ni al mensaje', async () => {
+            const logger = fakes.createFakeLogger();
+
+            const caught = await runCalculationError(401, {
+                error: 'x',
+                code: 'invalid_key',
+                docs_url: 'https://docs.invalid/errors#invalid_key'
+            }, undefined, logger);
+
+            expect(logger.error.mock.calls[0][0]).toContain('docs_url: https://docs.invalid/errors#invalid_key');
+            expect(caught.message).not.toContain('docs.invalid');
+            capturedConsoleOutput().forEach(line => {
+                expect(line).not.toContain('docs.invalid');
+            });
+        });
+    });
+
+    describe('la prueba que define el requisito: el texto engañoso no cambia nada', () => {
+        it('{ code: tax_code_missing, message: "Invalid API key" } se clasifica como tax_code_missing, no como llave inválida', async () => {
+            const caught = await runCalculationError(422, {
+                error: 'x',
+                code: 'tax_code_missing',
+                message: 'Invalid API key'
+            });
+
+            expect(caught.message.startsWith('Error HTTP 422 (tax_code_missing): ')).toBe(true);
+            expect(caught.message).toContain('tax_code');
+            expect(caught.message).not.toContain('SYNEXUS_API_KEY');
+            // El texto engañoso sólo aparece citado, nunca interpretado
+            expect(caught.message).toContain('Mensaje del proveedor: "Invalid API key"');
+        });
+
+        it('{ code: invalid_key, message: "tax_code missing on line 1" } se clasifica como invalid_key', async () => {
+            const caught = await runCalculationError(401, {
+                error: 'x',
+                code: 'invalid_key',
+                message: 'tax_code missing on line 1'
+            });
+
+            expect(caught.message.startsWith('Error HTTP 401 (invalid_key): ')).toBe(true);
+            expect(caught.message).toContain('SYNEXUS_API_KEY');
+            expect(caught.message).not.toContain('Una línea del carrito');
+        });
+
+        it('el mismo code bajo dos status distintos produce la misma descripción: el cálculo se clasifica por código, no por status', async () => {
+            const under422 = await runCalculationError(422, { error: 'x', code: 'cart_empty' });
+            axios.mockReset();
+            const under400 = await runCalculationError(400, { error: 'x', code: 'cart_empty' });
+
+            expect(under422.message).toContain('El carrito está vacío');
+            expect(under400.message).toContain('El carrito está vacío');
+            expect(under422.message.startsWith('Error HTTP 422 (cart_empty): ')).toBe(true);
+            expect(under400.message.startsWith('Error HTTP 400 (cart_empty): ')).toBe(true);
+        });
+    });
+});
+
+describe('SynexusApiClient — SAFE-05: los errores de cancelación se clasifican por status HTTP, sin código y sin leer el texto', () => {
+    // Los errores de invoices/cancel vienen en forma simple { error, message },
+    // SIN code. El status es la única señal estable; el message se cita tal
+    // cual y nunca decide nada. Si el cuerpo trajera code, se ignora.
+    const cancelBody = () => ({ error: 'x', message: 'Invoice not found' });
+
+    /**
+     * Ejecuta makeRequest('cancel_tax') con axios resolviendo un error y
+     * devuelve el error atrapado.
+     * @param {number} status - Status HTTP
+     * @param {Object} data - Cuerpo del error
+     * @param {Object} [headers] - Headers de respuesta (minúsculas)
+     * @param {Object} [logger] - Doble del logger
+     * @returns {Promise<Error|null>}
+     */
+    const runCancelError = async (status, data, headers, logger) => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(status, data, headers));
+        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        try {
+            await client.makeRequest('cancel_tax', createCancelBody(), entityCode);
+            return null;
+        } catch (error) {
+            return error;
+        }
+    };
+
+    it.each([
+        [400, 'no es válido'],
+        [404, 'no existe'],
+        [409, 'chocó'],
+        [422, 'no puede cancelar']
+    ])('%i → "Error HTTP <status>: …", contiene "%s", cita el mensaje del proveedor y lleva request_id=', async (status, fragment) => {
+        const logger = fakes.createFakeLogger();
+
+        const caught = await runCancelError(status, cancelBody(), { 'x-request-id': 'rid-cx' }, logger);
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith(`Error HTTP ${status}: `)).toBe(true);
+        expect(caught.message).toContain(fragment);
+        expect(caught.message).toContain('Mensaje del proveedor: "Invoice not found"');
+        expect(caught.message).toContain('request_id=rid-cx');
+        expect(caught.providerResponded).toBe(true);
+        expect(logger.error.mock.calls[0][0]).toContain(fragment);
+        expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-cx');
+        expect(logger.error.mock.calls[0][0]).toContain('Operation: cancel_tax');
+    });
+
+    it('418 (fuera del catálogo): "La cancelación falló con HTTP 418" y el mensaje del proveedor citado', async () => {
+        const caught = await runCancelError(418, cancelBody());
+
+        expect(caught.message).toContain('La cancelación falló con HTTP 418');
+        expect(caught.message).toContain('Mensaje del proveedor: "Invoice not found"');
+    });
+
+    it('el MISMO message bajo 404 y bajo 422 produce descripciones distintas: la clasificación es por status, no por texto', async () => {
+        const under404 = await runCancelError(404, cancelBody());
+        axios.mockReset();
+        const under422 = await runCancelError(422, cancelBody());
+
+        expect(under404.message).toContain('no existe');
+        expect(under404.message).not.toContain('no puede cancelar');
+        expect(under422.message).toContain('no puede cancelar');
+        expect(under422.message).not.toContain('no existe');
+        expect(under404.message).not.toBe(under422.message);
+    });
+
+    it('un cuerpo de cancelación sin code no produce la cadena undefined en el mensaje ni en la consola, ni un paréntesis vacío tras el status', async () => {
+        const caught = await runCancelError(404, cancelBody());
+
+        expect(caught.message).not.toContain('undefined');
+        expect(caught.message).not.toContain('Error HTTP 404 (');
+        capturedConsoleOutput().forEach(line => {
+            expect(line).not.toContain('undefined');
+        });
+    });
+
+    it('un cuerpo de cancelación que sí trajera code: invalid_key se clasifica igual por status: el mensaje NO contiene SYNEXUS_API_KEY', async () => {
+        const caught = await runCancelError(404, { error: 'x', code: 'invalid_key', message: 'Invoice not found' });
+
+        expect(caught.message.startsWith('Error HTTP 404: ')).toBe(true);
+        expect(caught.message).toContain('no existe');
+        expect(caught.message).not.toContain('SYNEXUS_API_KEY');
+        expect(caught.message).not.toContain('(invalid_key)');
+    });
+
+    it('sin message en el cuerpo: la descripción por status, sin sufijo y sin undefined', async () => {
+        const caught = await runCancelError(422, { error: 'x' });
+
+        expect(caught.message).toContain('no puede cancelar');
+        expect(caught.message).not.toContain('Mensaje del proveedor');
+        expect(caught.message).not.toContain('undefined');
+    });
+
+    it('un cuerpo que no es objeto (HTML de un proxy) también se clasifica por status, sin lanzar por el acceso', async () => {
+        const caught = await runCancelError(404, '<html>Not Found</html>');
+
+        expect(caught).not.toBeNull();
+        expect(caught.message.startsWith('Error HTTP 404: ')).toBe(true);
+        expect(caught.message).toContain('no existe');
+    });
+
+    it('la llave no sale por consola en una cancelación clasificada', async () => {
+        const caught = await runCancelError(409, cancelBody());
+
+        expect(caught).not.toBeNull();
+        expectNoCredentialLeak();
+        expect(caught.message).not.toContain(apiKey);
     });
 });
 
