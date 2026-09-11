@@ -1,7 +1,8 @@
 // tests/synexusApiClient.test.js
 // El cliente HTTP del contrato v2 (src/api/synexusApiClient.js): método,
 // URL por operación (cálculo para get_tax/post_tax, cancelación para
-// cancel_tax, sin rama por omisión), headers y —sobre todo— que la llave
+// cancel_tax, sin rama por omisión), headers, el identificador de petición
+// del proveedor en toda corrida (SAFE-06) y —sobre todo— que la llave
 // portadora no se filtre por ninguna vía de consola, ni en el camino feliz
 // ni en el de error (CONN-01, CONN-02, CONN-03, CONN-04, CFG-05, OPER-03).
 //
@@ -366,7 +367,10 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
 
         expect(result).toBe(providerBody);
         expect(consoleLogSpy).toHaveBeenCalledWith('Respuesta recibida - Status: 200 OK');
-        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200');
+        // La línea de éxito lleva SIEMPRE el identificador del proveedor; este
+        // cuerpo no trae meta.request_id ni la respuesta trae X-Request-Id, y
+        // eso también se dice (SAFE-06).
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=no informado por el proveedor');
     });
 
     it('con 400 lanza con un mensaje que empieza por "Error HTTP 400: " y registra en el logger', async () => {
@@ -383,14 +387,17 @@ describe('SynexusApiClient — manejo de la respuesta (_handleResponse)', () => 
 
         expect(caught).not.toBeNull();
         expect(caught.message.startsWith('Error HTTP 400: ')).toBe(true);
-        expect(caught.message).toBe('Error HTTP 400: {"error":"tax_code_missing"}');
+        // Ese cuerpo no trae `code`, así que sigue el molde de v1 (cuerpo
+        // serializado) más el identificador del proveedor, que aquí no vino
+        // por ninguna vía (SAFE-06).
+        expect(caught.message).toBe('Error HTTP 400: {"error":"tax_code_missing"} - request_id=no informado por el proveedor');
         // Misma estructura que el molde de v1: el throw de _handleResponse cae en
         // el catch de makeRequest, que además pasa por _handleError. Por eso el
         // logger recibe dos entradas; la primera es la de _handleResponse.
         expect(logger.error).toHaveBeenCalled();
         expect(logger.error.mock.calls[0][0]).toContain('Error HTTP 400');
         expect(logger.error.mock.calls[0][0]).toContain('Operation: get_tax');
-        expect(consoleErrorSpy).toHaveBeenCalledWith('Error HTTP 400: {"error":"tax_code_missing"}');
+        expect(consoleErrorSpy).toHaveBeenCalledWith('Error HTTP 400: {"error":"tax_code_missing"} - request_id=no informado por el proveedor');
     });
 
     it('con 422 (dentro del corte de validateStatus) también lanza con el prefijo Error HTTP', async () => {
@@ -588,6 +595,417 @@ describe('SynexusApiClient — la llave nunca sale por consola (CFG-05)', () => 
                 const text = typeof arg === 'string' ? arg : JSON.stringify(arg);
                 expect(text).not.toContain(apiKey);
             });
+        });
+    });
+});
+
+describe('SynexusApiClient — SAFE-06: el identificador de petición del proveedor se registra en toda corrida', () => {
+    // Es lo que el proveedor pide para levantar soporte. Llega por tres vías:
+    // meta.request_id en el cuerpo de ÉXITO del cálculo, request_id en el
+    // cuerpo de ERROR del cálculo, y el header X-Request-Id —que axios entrega
+    // en minúsculas— en todos los endpoints, también la cancelación. Se
+    // prefiere el cuerpo. Cuando el proveedor NO respondió, lo único
+    // correlacionable es la llave que nexgen generó en el cuerpo del cálculo;
+    // la cancelación no lleva ninguna, y eso también se dice.
+    const noProviderId = 'no informado por el proveedor';
+    const ownRequestId = '11111111-1111-4111-8111-111111111111';
+
+    /**
+     * Ejecuta makeRequest con axios RESOLVIENDO `response` y devuelve el error
+     * atrapado, o null si resolvió.
+     * @param {string} operation - Operación
+     * @param {Object} response - Lo que axios resolverá
+     * @param {Object} [logger] - Doble del logger
+     * @param {Object} [body] - Cuerpo a enviar (por omisión, el del cálculo)
+     * @returns {Promise<Error|null>}
+     */
+    const runResolved = async (operation, response, logger, body) => {
+        axios.mockResolvedValue(response);
+        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        try {
+            await client.makeRequest(operation, body || createRequestBody(), entityCode);
+            return null;
+        } catch (error) {
+            return error;
+        }
+    };
+
+    /**
+     * Ejecuta makeRequest con axios RECHAZANDO `error` y devuelve el error atrapado.
+     * @param {string} operation - Operación
+     * @param {Error} error - Lo que axios rechazará
+     * @param {Object} [logger] - Doble del logger
+     * @param {Object} [body] - Cuerpo a enviar (por omisión, el del cálculo)
+     * @returns {Promise<Error|null>}
+     */
+    const runRejected = async (operation, error, logger, body) => {
+        axios.mockRejectedValue(error);
+        const client = new SynexusApiClient(createSynexusConfigDouble(), logger || fakes.createFakeLogger());
+        try {
+            await client.makeRequest(operation, body || createRequestBody(), entityCode);
+            return null;
+        } catch (thrown) {
+            return thrown;
+        }
+    };
+
+    /**
+     * La línea "Identificador para soporte: …" del bloque de diagnóstico de
+     * _handleError, o undefined si no se imprimió.
+     * @returns {string|undefined}
+     */
+    const supportLine = () => {
+        const call = consoleErrorSpy.mock.calls
+            .find(call => typeof call[0] === 'string' && call[0].startsWith('Identificador para soporte: '));
+        return call ? call[0] : undefined;
+    };
+
+    /**
+     * Todo lo que recibió el logger, argumento por argumento, como cadenas.
+     * @param {Object} logger - Doble del logger
+     * @returns {string[]}
+     */
+    const loggerOutput = (logger) => {
+        return logger.error.mock.calls
+            .reduce((all, call) => all.concat(call), [])
+            .map(arg => (typeof arg === 'string' ? arg : JSON.stringify(arg)));
+    };
+
+    /**
+     * La llave no está en stdout, ni en stderr, ni en el mensaje lanzado, ni
+     * en el logger. Es expectNoCredentialLeak extendida a las dos vías que
+     * este plan añade (el mensaje con id y la nota de soporte).
+     * @param {Error} caught - El error atrapado
+     * @param {Object} logger - Doble del logger
+     */
+    const expectNoLeakAnywhere = (caught, logger) => {
+        expectNoCredentialLeak();
+        expect(caught.message).not.toContain(apiKey);
+        expect(caught.message).not.toContain('Bearer ');
+        const logged = loggerOutput(logger);
+        expect(logged.length).toBeGreaterThan(0);
+        logged.forEach(line => {
+            expect(line).not.toContain(apiKey);
+            expect(line).not.toContain('Bearer ');
+            expect(line).not.toContain('Authorization');
+        });
+    };
+
+    describe('en la línea de éxito', () => {
+        it('con meta.request_id en el cuerpo Y X-Request-Id en el header, la línea lleva el del cuerpo: se prefiere el cuerpo', async () => {
+            const response = fakes.createAxiosResponse(
+                200,
+                { total_tax: '0.00', meta: { request_id: 'rid-body' } },
+                { 'x-request-id': 'rid-header' }
+            );
+
+            const caught = await runResolved('get_tax', response);
+
+            expect(caught).toBeNull();
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=rid-body');
+            capturedConsoleOutput().forEach(line => {
+                expect(line).not.toContain('rid-header');
+            });
+        });
+
+        it('sólo con el header x-request-id (como lo entrega axios, en minúsculas), la línea lleva el header', async () => {
+            const response = fakes.createAxiosResponse(200, { total_tax: '0.00' }, { 'x-request-id': 'rid-header' });
+
+            await runResolved('get_tax', response);
+
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=rid-header');
+        });
+
+        it('sin meta.request_id ni header, la línea lo dice: request_id=no informado por el proveedor', async () => {
+            await runResolved('get_tax', fakes.createAxiosResponse(200, { total_tax: '0.00' }));
+
+            expect(consoleLogSpy).toHaveBeenCalledWith(`SUCCESS: get_tax - Status: 200 - request_id=${noProviderId}`);
+        });
+
+        it('post_tax también: misma línea con su operación y el id del cuerpo', async () => {
+            const response = fakes.createAxiosResponse(200, { total_tax: '1.00', meta: { request_id: 'rid-post' } });
+
+            await runResolved('post_tax', response);
+
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - Status: 200 - request_id=rid-post');
+        });
+
+        it('cancel_tax con header: la cancelación no trae meta en el cuerpo, así que la línea lleva el header', async () => {
+            const response = fakes.createAxiosResponse(
+                200,
+                { message: 'Invoice cancelled', updated_invoices: 1 },
+                { 'x-request-id': 'rid-cancel' }
+            );
+
+            await runResolved('cancel_tax', response, undefined, createCancelBody());
+
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: cancel_tax - Status: 200 - request_id=rid-cancel');
+        });
+
+        it('un meta.request_id vacío no cuenta: cae al header', async () => {
+            const response = fakes.createAxiosResponse(
+                200,
+                { total_tax: '0.00', meta: { request_id: '' } },
+                { 'x-request-id': 'rid-header' }
+            );
+
+            await runResolved('get_tax', response);
+
+            expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=rid-header');
+        });
+
+        it('leer el identificador no transforma la respuesta: el resultado sigue siendo response.data por identidad, con su meta', async () => {
+            const providerBody = { total_tax: '0.00', meta: { request_id: 'rid-body' } };
+            axios.mockResolvedValue(fakes.createAxiosResponse(200, providerBody, { 'x-request-id': 'rid-header' }));
+            const client = new SynexusApiClient(createSynexusConfigDouble(), fakes.createFakeLogger());
+
+            const result = await client.makeRequest('get_tax', createRequestBody(), entityCode);
+
+            expect(result).toBe(providerBody);
+            expect(result.meta).toEqual({ request_id: 'rid-body' });
+        });
+    });
+
+    describe('en un error con respuesta del proveedor (4xx, resuelto dentro del corte de validateStatus)', () => {
+        it('422 con request_id en el cuerpo de error: el mensaje lanzado y la primera entrada del logger llevan request_id=rid-err', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(422, { error: 'unprocessable', request_id: 'rid-err' });
+
+            const caught = await runResolved('get_tax', response, logger);
+
+            expect(caught).not.toBeNull();
+            expect(caught.message.startsWith('Error HTTP 422')).toBe(true);
+            expect(caught.message).toContain('request_id=rid-err');
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-err');
+            expect(logger.error.mock.calls[0][0]).toContain('Operation: get_tax');
+        });
+
+        it('422 sólo con el header x-request-id: el mensaje lanzado y el log llevan ese valor', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(422, { error: 'unprocessable' }, { 'x-request-id': 'rid-h422' });
+
+            const caught = await runResolved('get_tax', response, logger);
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('request_id=rid-h422');
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-h422');
+        });
+
+        it('422 con request_id en el cuerpo Y en el header: gana el cuerpo, también en el error', async () => {
+            const response = fakes.createAxiosResponse(422, { error: 'x', request_id: 'rid-err' }, { 'x-request-id': 'rid-h422' });
+
+            const caught = await runResolved('get_tax', response);
+
+            expect(caught.message).toContain('request_id=rid-err');
+            expect(caught.message).not.toContain('rid-h422');
+        });
+
+        it('la nota de soporte de _handleError dice (del proveedor) con el MISMO id y NUNCA "generado por nexgen": el proveedor sí respondió', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(422, { error: 'x', request_id: 'rid-err' });
+
+            await runResolved('get_tax', response, logger);
+
+            const line = supportLine();
+            expect(line).toBeDefined();
+            expect(line).toBe('Identificador para soporte: request_id=rid-err (del proveedor)');
+            expect(line).not.toContain('generado por nexgen');
+            expect(line).not.toContain(ownRequestId);
+            // La segunda entrada del logger es la de _handleError (molde de v1:
+            // el throw de _handleResponse cae en el catch de makeRequest).
+            expect(logger.error).toHaveBeenCalledTimes(2);
+            expect(logger.error.mock.calls[1][0]).toContain('request_id=rid-err (del proveedor)');
+            expect(logger.error.mock.calls[1][0]).not.toContain('generado por nexgen');
+        });
+
+        it('la nota de soporte se imprime dentro del bloque de diagnóstico, después de la marca de tiempo', async () => {
+            await runResolved('get_tax', fakes.createAxiosResponse(422, { error: 'x', request_id: 'rid-err' }));
+
+            const lines = consoleErrorSpy.mock.calls.map(call => call[0]);
+            const headerIndex = lines.indexOf('\n--- Información de diagnóstico ---');
+            const timestampIndex = lines.findIndex(line => typeof line === 'string' && line.startsWith('Timestamp: '));
+            const supportIndex = lines.findIndex(line => typeof line === 'string' && line.startsWith('Identificador para soporte: '));
+            expect(headerIndex).toBeGreaterThanOrEqual(0);
+            expect(timestampIndex).toBeGreaterThan(headerIndex);
+            expect(supportIndex).toBeGreaterThan(timestampIndex);
+        });
+
+        it('4xx sin id por ninguna vía: mensaje y nota dicen "no informado por el proveedor", y la nota sigue siendo (del proveedor)', async () => {
+            const logger = fakes.createFakeLogger();
+
+            const caught = await runResolved('get_tax', fakes.createAxiosResponse(400, { error: 'bad_request' }), logger);
+
+            expect(caught.message).toContain(`request_id=${noProviderId}`);
+            expect(supportLine()).toBe(`Identificador para soporte: request_id=${noProviderId} (del proveedor)`);
+            expect(logger.error.mock.calls[1][0]).toContain(`request_id=${noProviderId} (del proveedor)`);
+        });
+
+        it('el Error lanzado va marcado para el resto del proceso: providerResponded true y providerRequestId con el id', async () => {
+            const caught = await runResolved('get_tax', fakes.createAxiosResponse(422, { error: 'x', request_id: 'rid-err' }));
+
+            expect(caught.providerResponded).toBe(true);
+            expect(caught.providerRequestId).toBe('rid-err');
+        });
+
+        it('sin id, providerRequestId es null (no una cadena vacía ni el texto "no informado")', async () => {
+            const caught = await runResolved('get_tax', fakes.createAxiosResponse(422, { error: 'x' }));
+
+            expect(caught.providerResponded).toBe(true);
+            expect(caught.providerRequestId).toBeNull();
+        });
+
+        it('cancel_tax con 404 y header: el mensaje lanzado y el log llevan el header (la cancelación no trae request_id en el cuerpo)', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(404, { error: 'not_found', message: 'Invoice not found' }, { 'x-request-id': 'rid-c404' });
+
+            const caught = await runResolved('cancel_tax', response, logger, createCancelBody());
+
+            expect(caught).not.toBeNull();
+            expect(caught.message).toContain('request_id=rid-c404');
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-c404');
+            expect(supportLine()).toBe('Identificador para soporte: request_id=rid-c404 (del proveedor)');
+        });
+
+        it('docs_url del cuerpo de error va al logger de winston y a NINGUNA línea de consola: apunta a un host que no resuelve', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(422, {
+                error: 'unprocessable',
+                request_id: 'rid-doc',
+                docs_url: 'https://docs.invalid/x'
+            });
+
+            const caught = await runResolved('get_tax', response, logger);
+
+            expect(caught).not.toBeNull();
+            expect(loggerOutput(logger).some(line => line.includes('docs_url: https://docs.invalid/x'))).toBe(true);
+            capturedConsoleOutput().forEach(line => {
+                expect(line).not.toContain('docs.invalid');
+            });
+            expect(caught.message).not.toContain('docs.invalid');
+        });
+
+        it('una respuesta resuelta que trae la petición en config y request (como las de axios) no filtra la llave: ni consola, ni logger, ni mensaje', async () => {
+            const logger = fakes.createFakeLogger();
+            const response = fakes.createAxiosResponse(422, { error: 'x', request_id: 'rid-err' }, { 'x-request-id': 'rid-h' });
+            response.config = {
+                url: calculationUrl,
+                headers: { Authorization: `Bearer ${apiKey}`, 'X-Synexus-Entity': entityCode }
+            };
+            response.request = { _header: `Authorization: Bearer ${apiKey}` };
+
+            const caught = await runResolved('get_tax', response, logger);
+
+            expect(caught).not.toBeNull();
+            expectNoLeakAnywhere(caught, logger);
+        });
+    });
+
+    describe('en un error sin respuesta del proveedor', () => {
+        it('ECONNABORTED en el cálculo: la consola y la única entrada del logger llevan el request_id que generó nexgen, marcado como tal', async () => {
+            const logger = fakes.createFakeLogger();
+            const body = createRequestBody();
+            expect(body.request_id).toBe(ownRequestId);
+            const error = createAxiosError({ code: 'ECONNABORTED', request: {} });
+
+            const caught = await runRejected('get_tax', error, logger, body);
+
+            expect(caught).toBe(error);
+            const line = supportLine();
+            expect(line).toBeDefined();
+            expect(line).toContain(`Identificador para soporte: request_id=${ownRequestId} (generado por nexgen`);
+            expect(line).toContain('el proveedor no respondió');
+            expect(line).not.toContain('del proveedor)');
+            expect(logger.error).toHaveBeenCalledTimes(1);
+            expect(logger.error.mock.calls[0][0]).toContain(ownRequestId);
+            expect(logger.error.mock.calls[0][0]).toContain('generado por nexgen');
+            expectNoLeakAnywhere(caught, logger);
+        });
+
+        it('ECONNREFUSED en el cálculo: misma nota con la llave propia; el mensaje del error original NO se toca (se re-lanza por identidad)', async () => {
+            const error = createAxiosError({ code: 'ECONNREFUSED', request: {} });
+            const originalMessage = error.message;
+
+            const caught = await runRejected('get_tax', error);
+
+            expect(caught).toBe(error);
+            expect(caught.message).toBe(originalMessage);
+            expect(caught.message).not.toContain('request_id=');
+            expect(supportLine()).toContain(`request_id=${ownRequestId} (generado por nexgen`);
+        });
+
+        it('cancel_tax con ECONNREFUSED: la nota dice ninguno, porque la cancelación no lleva llave y el proveedor no respondió', async () => {
+            const logger = fakes.createFakeLogger();
+            const error = createAxiosError({ code: 'ECONNREFUSED', request: {} });
+
+            const caught = await runRejected('cancel_tax', error, logger, createCancelBody());
+
+            expect(caught).toBe(error);
+            expect(supportLine()).toBe(
+                'Identificador para soporte: request_id=ninguno (la cancelación no lleva llave y el proveedor no respondió)'
+            );
+            expect(logger.error).toHaveBeenCalledTimes(1);
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=ninguno (la cancelación no lleva llave y el proveedor no respondió)');
+            expect(logger.error.mock.calls[0][0]).not.toContain('generado por nexgen');
+            expect(logger.error.mock.calls[0][0]).not.toContain('del proveedor)');
+        });
+
+        it('un error genérico sin código ni respuesta: también lleva la llave propia del cálculo', async () => {
+            const caught = await runRejected('get_tax', createAxiosError({ message: 'algo inesperado' }));
+
+            expect(caught.message).toBe('algo inesperado');
+            expect(supportLine()).toContain(`request_id=${ownRequestId} (generado por nexgen`);
+        });
+    });
+
+    describe('en un error que axios rechaza con respuesta del proveedor (5xx, fuera del corte de validateStatus)', () => {
+        it('503 con x-request-id en la respuesta: consola y logger llevan request_id=rid-503 (del proveedor); el error se re-lanza por identidad', async () => {
+            const logger = fakes.createFakeLogger();
+            const error = createAxiosError({
+                response: {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    data: { error: 'upstream_unavailable' },
+                    headers: { 'x-request-id': 'rid-503' }
+                }
+            });
+            expect(error.config.headers.Authorization).toContain(apiKey);
+
+            const caught = await runRejected('get_tax', error, logger);
+
+            expect(caught).toBe(error);
+            expect(supportLine()).toBe('Identificador para soporte: request_id=rid-503 (del proveedor)');
+            expect(logger.error).toHaveBeenCalledTimes(1);
+            expect(logger.error.mock.calls[0][0]).toContain('request_id=rid-503 (del proveedor)');
+            expect(logger.error.mock.calls[0][0]).not.toContain(ownRequestId);
+            expectNoLeakAnywhere(caught, logger);
+        });
+
+        it('503 con request_id en el cuerpo del error y otro en el header: gana el cuerpo', async () => {
+            const error = createAxiosError({
+                response: {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                    data: { error: 'upstream_unavailable', request_id: 'rid-503-body' },
+                    headers: { 'x-request-id': 'rid-503-header' }
+                }
+            });
+
+            await runRejected('get_tax', error);
+
+            expect(supportLine()).toBe('Identificador para soporte: request_id=rid-503-body (del proveedor)');
+        });
+
+        it('5xx sin id por ninguna vía y sin headers en el doble: "no informado por el proveedor", sin lanzar por el acceso', async () => {
+            const logger = fakes.createFakeLogger();
+            const error = createAxiosError({
+                response: { status: 502, statusText: 'Bad Gateway', data: 'Bad Gateway' }
+            });
+
+            const caught = await runRejected('get_tax', error, logger);
+
+            expect(caught).toBe(error);
+            expect(supportLine()).toBe(`Identificador para soporte: request_id=${noProviderId} (del proveedor)`);
+            expect(logger.error.mock.calls[0][0]).toContain(`request_id=${noProviderId} (del proveedor)`);
         });
     });
 });

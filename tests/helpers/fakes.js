@@ -42,17 +42,22 @@ const createFakeConfig = (overrides) => {
 };
 
 /**
- * Respuesta con la forma que axios entrega a TaxApiClient._handleResponse.
- * El statusText se deriva del código de estado, igual que lo haría Node.
+ * Respuesta con la forma que axios entrega a _handleResponse (el de v1 y el
+ * de v2). El statusText se deriva del código de estado, igual que lo haría
+ * Node. Los headers son opcionales y, como los entrega axios en Node, van con
+ * el nombre en MINÚSCULAS: { 'x-request-id': 'rid-1', 'retry-after': '30' }.
+ * Sin tercer argumento, headers es {} — los usos existentes no cambian.
  * @param {number} status - Código HTTP
  * @param {*} data - Cuerpo de la respuesta
- * @returns {{ status: number, statusText: string, data: * }}
+ * @param {Object} [headers] - Headers de respuesta, nombres en minúsculas
+ * @returns {{ status: number, statusText: string, data: *, headers: Object }}
  */
-const createAxiosResponse = (status, data) => {
+const createAxiosResponse = (status, data, headers) => {
     return {
         status: status,
         statusText: http.STATUS_CODES[status] || '',
-        data: data
+        data: data,
+        headers: headers || {}
     };
 };
 

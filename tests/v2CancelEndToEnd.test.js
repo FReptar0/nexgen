@@ -18,6 +18,9 @@
 //     cancelación (validateV2FileShape es común a las tres operaciones)
 //   - la respuesta { message, updated_invoices, invoice_id, client_id,
 //     entity_id } se escribe por identidad en RESPONSE_<original>
+//   - la línea de éxito lleva el X-Request-Id del proveedor y un 404 lanza
+//     clasificado por status, citando el mensaje del proveedor y el id
+//     (SAFE-06, SAFE-05)
 //   - COMP-01: cancel_tax sin selector sigue siendo el GET de v1 contra
 //     CancelTransaction, con el archivo v1 ENTERO y sin Authorization
 //
@@ -181,7 +184,9 @@ describe('Recorrido completo — cancelación v2 (cancel_tax --api-version=v2 --
 
     beforeEach(async () => {
         cancelResponse = createCancelResponse();
-        axios.mockResolvedValue(fakes.createAxiosResponse(200, cancelResponse));
+        // La cancelación no trae meta.request_id en el cuerpo: el identificador
+        // del proveedor llega sólo por el header X-Request-Id (SAFE-06).
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, cancelResponse, { 'x-request-id': 'rid-cancel-ok' }));
         graph = buildGraph(args, createCancelFile());
         // Espías sobre el builder y el validador REALES, instalados antes de
         // ejecutar: dejan pasar la llamada y sólo cuentan
@@ -262,6 +267,10 @@ describe('Recorrido completo — cancelación v2 (cancel_tax --api-version=v2 --
     it('la corrida termina con el mensaje de éxito del CLI nombrando cancel_tax', () => {
         expect(consoleLogSpy).toHaveBeenCalledWith('Operación cancel_tax completada exitosamente');
         expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: cancel_tax - File: c.json');
+    });
+
+    it('la línea de éxito del cliente v2 lleva el request_id del header X-Request-Id: la cancelación no trae meta en el cuerpo (SAFE-06)', () => {
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: cancel_tax - Status: 200 - request_id=rid-cancel-ok');
     });
 
     it('la línea de perfil se imprime ANTES de la llamada a axios, con la llave enmascarada (CONN-05, CFG-05)', () => {

@@ -59,13 +59,15 @@ const createV1Body = () => ({
 });
 
 // Respuesta del proveedor v2 con la forma de la respuesta real de staging del
-// 9-sep-2026: montos como cadenas decimales y un cero que NO es defecto.
+// 9-sep-2026: montos como cadenas decimales, un cero que NO es defecto y el
+// identificador de petición del proveedor en meta.request_id (SAFE-06).
 const createProviderResponse = () => ({
     id: 'txn_demo_001',
     transaction_type: 'sales_estimate',
     committed: false,
     total_tax: '0.00',
-    exemption: { source: 'no_nexus' }
+    exemption: { source: 'no_nexus' },
+    meta: { request_id: 'e2e-rid-0001' }
 });
 
 // La misma forma para una confirmación: lo que el proveedor devuelve cuando la
@@ -247,6 +249,10 @@ describe('Recorrido completo — cotización v2 (get_tax --api-version=v2 --enti
         expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - File: a.json');
     });
 
+    it('la línea de éxito del cliente v2 lleva el request_id del proveedor, tomado de meta.request_id del cuerpo (SAFE-06)', () => {
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: get_tax - Status: 200 - request_id=e2e-rid-0001');
+    });
+
     it('la llave completa no aparece en ninguna línea de consola ni del logger (CFG-05)', () => {
         const output = capturedConsoleOutput();
         expect(output.length).toBeGreaterThan(0);
@@ -322,6 +328,10 @@ describe('Recorrido completo — confirmación v2 (post_tax --api-version=v2 --e
     it('la corrida termina con el mensaje de éxito del CLI nombrando post_tax', () => {
         expect(consoleLogSpy).toHaveBeenCalledWith('Operación post_tax completada exitosamente');
         expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - File: a.json');
+    });
+
+    it('la línea de éxito del cliente v2 lleva el request_id del proveedor también en la confirmación (SAFE-06)', () => {
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - Status: 200 - request_id=e2e-rid-0001');
     });
 
     it('la llave completa no aparece en ninguna línea de consola ni del logger (CFG-05)', () => {
@@ -644,7 +654,7 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
         });
     });
 
-    it('con un error de transporte que trae la petición en config (como los de axios), la llave no sale por consola ni por el logger', async () => {
+    it('con un error de transporte que trae la petición en config (como los de axios), la llave no sale por consola ni por el logger, y el log lleva el request_id que generó nexgen (SAFE-06)', async () => {
         const error = new Error('connect ECONNREFUSED');
         error.code = 'ECONNREFUSED';
         error.request = {};
@@ -662,5 +672,12 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
                 expect(String(arg)).not.toContain(v2ApiKey);
             });
         });
+        // El proveedor no respondió: lo único correlacionable es la llave de
+        // idempotencia que salió en el cuerpo, y el log la nombra como propia.
+        const sentRequestId = axios.mock.calls[0][0].data.request_id;
+        expect(sentRequestId).toMatch(uuidV4Pattern);
+        const loggedLines = graph.logger.error.mock.calls.map(call => String(call[0]));
+        expect(loggedLines.some(line => line.includes('generado por nexgen') && line.includes(sentRequestId))).toBe(true);
+        expect(capturedConsoleOutput().some(line => line.includes(`Identificador para soporte: request_id=${sentRequestId} (generado por nexgen`))).toBe(true);
     });
 });
