@@ -37,7 +37,7 @@ controla quien implementa.
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Camino v2 de punta a punta para una cotización** - Red de seguridad que congela v1, arranque con frenos antes de la red, y `get_tax` migrada sin dejar rastro en el proveedor
+- [x] **Phase 1: Camino v2 de punta a punta para una cotización** ✓ 2026-09-11 - Red de seguridad que congela v1, arranque con frenos antes de la red, y `get_tax` migrada sin dejar rastro en el proveedor
 - [ ] **Phase 2: Confirmar, cancelar y devolver la respuesta íntegra** - `post_tax` y `cancel_tax` migradas, y la respuesta v2 llegando sin pérdida al archivo que lee el ERP
 - [ ] **Phase 3: Verificación contra staging y corte documentado** - Procedimiento que el área de ERP ejecuta desde el servidor, más la lista de corte a producción
 
@@ -76,7 +76,7 @@ Plans:
   4. Cada una de las tres operaciones tiene prueba que verifica el cuerpo de la petición v2 que construye, sin salir a la red; la respuesta real de staging archivada en `data/` funciona como fixture de contrato de esas pruebas, y hay prueba que falla si la forma de la respuesta esperada se desvía de ella
   5. Los montos y tasas se escriben con los mismos dígitos que devolvió el proveedor, y hay prueba que falla si alguno pasa por conversión a punto flotante en cualquier punto del camino
   6. El archivo de salida conserva el nombre del archivo de entrada, el prefijo `RESPONSE_`, la numeración original y el directorio de salida, con el cuerpo escrito completo y sin transformar; los errores del contrato v2 se distinguen por su código estable y no por el texto del mensaje; y el identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida
-**Plans**: TBD
+**Plans**:  4 (01-01 … 01-04), todos completos
 
 ### Phase 3: Verificación contra staging y corte documentado
 **Goal**: El área de ERP puede validar las tres operaciones contra staging siguiendo un procedimiento escrito, y queda con una lista de verificación para decidir y ejecutar el corte a producción
@@ -97,7 +97,7 @@ Las fases se ejecutan en orden numérico: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Camino v2 de punta a punta para una cotización | 0/4 | Not started | - |
+| 1. Camino v2 de punta a punta para una cotización | 4/4 | Complete | 2026-09-11 |
 | 2. Confirmar, cancelar y devolver la respuesta íntegra | 0/TBD | Not started | - |
 | 3. Verificación contra staging y corte documentado | 0/TBD | Not started | - |
 
