@@ -71,9 +71,11 @@ resolves to v2; a server that runs v1 does not need them at all.
   The `--api-version=<v1|v2>` command-line flag overrides this variable
   for a single run.
 - **SYNEXUS_BASE_URL** (v2 only): Host of the v2 provider. Only the host
-  goes here; the calculation path (`/api/v1/tax_calculations`) is added by
-  the code. Staging is `https://compute.staging.synexustax.com`,
-  production is `https://compute.synexustax.com`.
+  goes here; the calculation path (`/api/v1/tax_calculations`) and the
+  cancel path (`/api/v1/invoices/cancel`) are added by the code. Staging
+  is `https://compute.staging.synexustax.com`, production is
+  `https://compute.synexustax.com`. `TEST_MODE` does not apply to v2: the
+  environment is this host together with the key prefix.
 - **SYNEXUS_API_KEY** (v2 only): Bearer key. It travels in the
   `Authorization: Bearer` header and never in the URL. **Its prefix must
   match the host**: `synexus_test_` keys are only valid against staging and
@@ -142,9 +144,22 @@ places.
 
 **The invocation without flags — the one the ERP wrapper emits — keeps
 taking the v1 path**, exactly as before, unless `TAX_API_VERSION=v2` is set
-in the environment. Under v2, only `get_tax` is implemented in this
-milestone phase: `post_tax` and `cancel_tax` with `--api-version=v2` abort
-before any request is made.
+in the environment. Under v2 the three operations are implemented; each
+one maps to the v2 contract like this:
+
+| Operation    | v2 request                                          | Body that goes on the wire                                                                          |
+| ------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `get_tax`    | `POST <SYNEXUS_BASE_URL>/api/v1/tax_calculations`   | the file, plus `transaction_type: "sales_estimate"`, `committed: false` and a fresh `request_id`   |
+| `post_tax`   | same calculation endpoint                           | the file, plus `transaction_type: "sales_invoice"`, `committed: true` and a fresh `request_id`     |
+| `cancel_tax` | `POST <SYNEXUS_BASE_URL>/api/v1/invoices/cancel`    | exactly `{ invoice_id, customer_id }`, projected from the file — nothing else, and no `request_id` |
+
+The key travels in the `Authorization: Bearer` header and the entity code
+in `X-Synexus-Entity`; the URL never carries a credential. The
+`request_id` is the idempotency key of the calculation requests: the
+provider deduplicates a repeated body with the same key, which is what
+makes the automatic retry below safe. The cancellation carries none on
+purpose — it is idempotent by nature (repeating it returns 404/422 with no
+double effect, and its 409 is documented as safe to retry).
 
 Every v2 run prints one profile line before touching the network:
 
@@ -173,20 +188,69 @@ The input JSON file should contain the transaction data in the format expected b
 - For `cancel_tax`: The `Committed` value is not validated
 
 Under **v2** the input file is the request body of the v2 contract
-(`invoice_id`, `to_state`, `cart[].item_id`, `cart[].tax_code`, ...) and
-must **not** contain `Committed`: a file that brings it is treated as a v1
-file and the run aborts with a message containing `parece del contrato v1`.
-nexgen owns the intent fields and adds them itself: `get_tax` sends
-`transaction_type: "sales_estimate"`, `committed: false` and a fresh
+(`invoice_id`, `customer_id`, `to_state`, `cart[].item_id`,
+`cart[].tax_code`, ...) and must **not** contain `Committed`: a file that
+brings it is treated as a v1 file and the run aborts with a message
+containing `parece del contrato v1`. A file whose root is an array is also
+rejected (`debe ser un objeto JSON, no un arreglo`). nexgen owns the
+intent fields and adds them itself: `get_tax` sends `transaction_type:
+"sales_estimate"`, `committed: false` and a fresh `request_id`; `post_tax`
+sends `transaction_type: "sales_invoice"`, `committed: true` and a fresh
 `request_id`. If the file already carries a `transaction_type` or
-`committed` that contradicts the operation, the run aborts instead of
-overwriting silently.
+`committed` that contradicts the operation — or its own `request_id` —
+the run aborts instead of overwriting silently. For `cancel_tax` the file
+only needs non-empty `invoice_id` and `customer_id` (the ERP may leave the
+same calculation-shaped file; everything else is ignored); if either is
+missing the run aborts before any request, naming the field. Under v2 the
+strings of the file travel verbatim — the apostrophe escape (`'` → `\'`)
+is a v1-only rule.
 
 ### Output
 
 - Successful responses are saved as `RESPONSE_<original_filename>.json` in the directory specified by `OUTPUT_DIR`
 - Error logs are saved in the `logs/` directory with daily rotation
 - Console output shows success/error messages
+
+### v2 diagnostics
+
+Every v2 run leaves the provider's request identifier on the console —
+it is what the provider asks for when opening a support case:
+
+- **Success:** `SUCCESS: <operation> - Status: 200 - request_id=<id>`.
+  The id comes from `meta.request_id` in the calculation response, or
+  from the `X-Request-Id` response header (the only source for
+  `cancel_tax`). The response is written to the file verbatim: amounts
+  and rates stay the quoted strings the provider sent (`"49.99"`,
+  `"0.0825"`), nothing is parsed or rounded.
+- **Calculation error (`get_tax` / `post_tax`):**
+  `Error HTTP <status> (<code>): <Spanish description> - request_id=<id>`.
+  The branch is decided by the provider's stable `code` — `invalid_key`,
+  `tax_code_missing`, `idempotency_key_conflict`, `invoice_stale_object`,
+  `rate_limited` (names the `Retry-After` seconds), `cart_empty`,
+  `validation_error` (lists `details`) — never by the wording of its
+  `message`, which is only quoted.
+- **Cancel error:** `Error HTTP <status>: <Spanish description> Mensaje
+  del proveedor: "<verbatim>" - request_id=<id>`. Cancel errors carry no
+  `code`, so they are classified by status: 400 invalid body, 404 the
+  invoice does not exist in that environment, 409 conflict with another
+  operation on the same invoice, 422 already cancelled or never
+  confirmed.
+- **Transport failure** (timeout, refused connection, 5xx): the
+  diagnostic block ends with `Identificador para soporte: request_id=…`
+  — the provider's id when it answered, the `request_id` nexgen
+  generated (`generado por nexgen`) when it did not.
+- **Automatic retry:** on a timeout, a 502/503/504, the calculation's
+  `409 invoice_stale_object` or the cancel 409, nexgen waits one second
+  and sends the **same body once more** — same `request_id` — printing
+  `Reintentando (1/1) con la misma llave de idempotencia (request_id=…)
+  tras …` (or `… con el mismo cuerpo …` for the cancellation, which has
+  no key). One retry, never more, and never on 401, 400/404/422, 429,
+  500, a refused connection or a `409 idempotency_key_conflict` (same
+  key, different body: the file changed between runs and needs a human).
+  If the retry fails too, the reported error is the second attempt's.
+  **Do not re-run a failed `post_tax` by hand to "retry" it**: a new
+  process is a new `request_id`, and the provider will treat it as a new
+  invoice.
 
 ## Logging
 
@@ -207,6 +271,9 @@ The application validates:
 - API response handling
 
 All errors are logged both to console and log files for debugging purposes.
+Under v2 the log entry also carries the `request_id` (see *v2
+diagnostics* above), and a transient failure is retried once with the
+same body before it is reported.
 
 ## Project Structure
 

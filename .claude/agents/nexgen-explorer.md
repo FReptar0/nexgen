@@ -20,7 +20,7 @@ src/cli/taxCommandHandler.js              → argv parse (flags + positionals), 
 src/validators/taxValidator.js            → Committed rules + sanitization (+ v2 intent rules)
 src/api/taxApiClient.js                   → v1: axios GET-with-body to STCCalcV3* (FROZEN)
 src/api/synexusRequestBuilder.js          → v2: intent fields + request_id on top of the file
-src/api/synexusApiClient.js               → v2: axios POST, Authorization: Bearer, X-Synexus-Entity; errors classified by `data.code` (calculation) / HTTP status (cancel); `request_id=` on every run
+src/api/synexusApiClient.js               → v2: axios POST, Authorization: Bearer, X-Synexus-Entity; errors classified by `data.code` (calculation) / HTTP status (cancel); `request_id=` on every run; ONE automatic retry with the same body (timeout / 502 / 503 / 504 / safe 409)
 src/storage/fileManager.js                → JSON I/O, RESPONSE_<name>.json
 src/infrastructure/logger.js              → winston, error-only, daily file
 src/config/index.js                       → dotenv + v1 endpoint resolution + getApiVersion()
@@ -65,7 +65,20 @@ Work in this order, in **one pass**:
          `validateV2IntentFields` are **not** called for cancellation.
      → trace `Cuerpo v2 a enviar:` → wiring guard →
      `synexusApiClient.makeRequest` (URL via `_resolveUrl(operation)`,
-     which asks `SynexusConfig` for the calculation or the cancel URL).
+     which asks `SynexusConfig` for the calculation or the cancel URL,
+     resolved **once** per request) → `_sendWithRetry` → `_send` (the
+     single `axios(...)` call). `_retryReasonFor` decides **one** retry
+     (`maxRetries = 1`, `retryDelayMs = 1000`, both class constants, not
+     env-driven) with the **same body object** — hence the same
+     `request_id` — on `ECONNABORTED` (timeout), HTTP 502/503/504, the
+     calculation's `409 invoice_stale_object` (by `data.code`) and the
+     cancel 409 (safe per contract). Never on 401, 400/404/422, 429, 500,
+     `ECONNREFUSED`/`ENOTFOUND`, nor the calculation's `409
+     idempotency_key_conflict` (explicit branch: same key, different
+     body). The retried attempt does not go through `_handleError`; the
+     reported outcome is the second attempt's. stdout shows
+     `Reintentando (1/1) …` with only the `request_id` (or "no lleva
+     llave" for cancel) and the reason — never headers.
      `validate()`, `validateCommittedField` **and `sanitizeStringFields`**
      are **never** called on this branch: the file's strings travel
      verbatim (WR-03). →
@@ -95,7 +108,12 @@ Work in this order, in **one pass**:
    overwrites prior responses.
 7. **Error model**: if any step would throw, indicate exit code (`1`),
    where the message lands (stderr + `logs/log_<date>.log`), and what
-   the wrapper would see.
+   the wrapper would see. Under v2, say whether the failure would have
+   been retried once first (`_retryReasonFor`) and note that the log
+   entry carries `request_id=` — the provider's id when it answered,
+   nexgen's own key (`generado por nexgen`) when it did not, `ninguno`
+   for a cancel with no answer — and that calculation errors are
+   classified by `data.code`, cancel errors by status.
 
 ## Output shape
 
@@ -113,10 +131,11 @@ Return **one** structured response:
 - sanitization deltas: <list strings that change>
 
 ## API call
-URL: <full URL with TEST_MODE assumption>
-Method: GET (with JSON body — unusual)
+URL: <full URL with TEST_MODE assumption; v2: per operation, TEST_MODE does not apply>
+Method: GET (with JSON body — unusual) · v2: POST
 Timeout: 30s
-Body (post-sanitization, key deltas only): …
+Retry: none (v1) · v2: one automatic retry, same body, on timeout/502/503/504/safe 409
+Body (post-sanitization, key deltas only): …  (v2: verbatim + intent fields, or the cancel projection)
 
 ## Persistence
 Output file: <OUTPUT_DIR>/RESPONSE_<basename>.json
@@ -130,8 +149,10 @@ ensureDirectory: yes (recursive)
   calculation route, classified by `data.code`; `Error HTTP <status>: <description>` for
   cancel, classified by status with the provider `message` quoted verbatim)
 - on HTTP 5xx: exit 1, axios throws, caught by _handleError
-  (v2: the diagnostic block ends with `Identificador para soporte: request_id=…`,
-  the provider's id when it answered, nexgen's own when it did not)
+  (v2: 502/503/504 and timeouts are retried once first — `Reintentando (1/1) …` on
+  stdout — and the diagnostic block of the SECOND attempt ends with
+  `Identificador para soporte: request_id=…`, the provider's id when it answered,
+  nexgen's own when it did not; a 500 is not retried)
 - on success: stdout "SUCCESS: …", exit 0 (v2: `… - request_id=<meta.request_id | X-Request-Id>`)
 
 ## Citations

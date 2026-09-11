@@ -84,6 +84,11 @@ throw new Error(errorMsg);
      (`tests/v1Freeze.messages.test.js`). Since phase 2 the file only
      gains lines: `git diff 4d6d438 -- src/validators/taxValidator.js`
      must show no deletions.
+   - The **v2** branch (`TaxCommandHandler._executeV2`) never calls
+     `sanitizeStringFields` (WR-03): that method stays v1-only, and the
+     apostrophe escape must not leak into the v2 wire payload. Do not
+     make `validateV2FileShape` or `validateV2IntentFields` return a
+     sanitized body.
    - Error path uses the `console.error` + `logger.error` + `throw`
      trio.
    - Error messages in Spanish, addressed to the operator.
@@ -91,7 +96,12 @@ throw new Error(errorMsg);
    this validator alone. After adding it to `validOperations` and
    writing its `Committed` rule, **tell the user** they still need to
    update `src/config/index.js` (`Config.getEndpointUrl`) and
-   optionally `src/api/taxApiClient.js` (a wrapper method).
+   optionally `src/api/taxApiClient.js` (a wrapper method). For the v2
+   contract the operation also needs a body builder
+   (`SynexusRequestBuilder.getIntentFor` or a projection like
+   `buildCancelBody`), a branch in `TaxCommandHandler._buildV2Body` and
+   an endpoint in `SynexusApiClient._resolveUrl` — all three throw on an
+   unknown operation on purpose, with no default branch.
 6. **Show the diff** in your summary at the end.
 
 ## Hard rules

@@ -60,6 +60,12 @@ came back.
      truncated or broken value; do not report it as a defect and do not
      try to print the full key.
    - The status code returned by the server.
+   - **Under v2**, the line `SUCCESS: get_tax - Status: 200 -
+     request_id=<provider id>`. Keep that `request_id` in the report: it
+     is what the provider asks for in support. If a `Reintentando (1/1)
+     …` line precedes it, the first attempt timed out or got a transient
+     5xx and nexgen re-sent the same body with the same key — expected
+     behavior, mention it.
    - The `RESPONSE_$ARGUMENTS` file in `OUTPUT_DIR` (if produced).
 4. **Summarize** for the operator:
    - What operation ran.
@@ -82,4 +88,11 @@ came back.
   Spanish and pinpoint the field. Don't guess — show the user.
 - Network failure: see `RUNBOOK.md` §6.1 for the symptom decision
   tree.
-- Don't retry on errors automatically. Surface to the user.
+- Don't retry on errors automatically. Surface to the user. Under v2
+  nexgen itself already performs a **single** automatic retry after a
+  timeout or a 502/503/504 (also after a `409 invoice_stale_object`),
+  reusing the same body and the same `request_id` — it shows as
+  `Reintentando (1/1) con la misma llave de idempotencia (request_id=…)
+  tras …` on stdout. Do not add manual retries on top of it: a new
+  invocation is a new key. For a quote this is harmless (nothing is
+  recorded), but the habit is what protects `/tax-commit`.
