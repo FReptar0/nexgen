@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-09-11T21:33:41.683Z"
+status: verifying
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-09-11T21:51:00.823Z"
 last_activity: 2026-09-11
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 7
-  percent: 88
+  completed_plans: 8
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-09-10)
 
 Phase: 02 (confirmar-cancelar-y-devolver-la-respuesta-ntegra) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-11
 
-Progress: [█████████░] 88%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [█████████░] 88%
 | Phase 02 P01 | 15min | 3 tasks | 14 files |
 | Phase 02 P02 | 12min | 2 tasks | 12 files |
 | Phase 02 P03 | 12min | 2 tasks | 9 files |
+| Phase 02 P04 | 13min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,10 @@ Decisiones que afectan el trabajo actual:
 - [Phase 02]: Los errores v2 se clasifican por data.code (cálculo) y por status HTTP (cancelación), citando el message del proveedor entre comillas sin interpretarlo — Un cambio de redacción del proveedor no debe cambiar el comportamiento de nexgen; gate de grep contra message.includes y parientes, validado por mutación (el mutante dispara el gate)
 - [Phase 02]: El request_id del proveedor se prefiere del cuerpo (meta.request_id / request_id) sobre el header x-request-id, y de los headers sólo se lee ése — Es el que el proveedor cita para soporte; nunca se serializa el objeto headers ni response.config/error.config (CFG-05)
 - [Phase 02]: Los 4xx resueltos lanzan un Error propio marcado con providerResponded/providerRequestId; los errores de axios (5xx, red) se re-lanzan por identidad y el id va a consola y log, no al message — La prueba de identidad de la Fase 1 (toBe) sigue en pie; sin respuesta queda el request_id que generó nexgen, y la cancelación dice 'ninguno'
+- [Phase 02]: options.wait se acepta sólo si es función y en otro caso se usa el setTimeout real — index.js no pasa opciones y hereda la espera de 1000 ms; la inyección existe únicamente para que la suite no duerma
+- [Phase 02]: El registro del reintento es la línea 'Reintentando (1/1) …' en stdout; la entrada de winston sigue siendo una sola, la del desenlace final — El plan exige que el intento reintentado no pase por _handleError y que _handleError no cambie; la prueba 'timeout dos veces' fija logger.error una vez
+- [Phase 02]: createClient conserva la firma (logger, options) y los casos que cuentan llamadas al doble de configuración leen client.synexusConfig — El constructor ya expone la configuración; el criterio de a lo sumo dos construcciones directas del cliente en la prueba se cumple
+- [Phase 02]: La documentación de 02-04 se extendió sin reescribir: lo único falso era 'only get_tax is implemented' en README, reemplazado por la tabla de las tres operaciones — Los comandos y agentes ya describían v2 desde 02-01..02-03; RUNBOOK, ARCHITECTURE y HANDOFF siguen para la Fase 3 por decisión de la fase
 
 ### Pending Todos
 
@@ -150,6 +155,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-11T21:33:41.678Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-09-11T21:51:00.818Z
+Stopped at: Completed 02-04-PLAN.md
 Resume file: None

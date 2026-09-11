@@ -81,7 +81,7 @@ Plans:
 - [x] 02-01-PLAN.md — `post_tax` bajo v2 (sales_invoice + committed true), fixture de contrato en `tests/fixtures/`, fidelidad numérica y contrato de archivos con el `FileManager` real, WR-03/WR-04
 - [x] 02-02-PLAN.md — `cancel_tax` bajo v2: `POST /api/v1/invoices/cancel` con la proyección `{ invoice_id, customer_id }`, aborto antes de la red si falta uno, recorrido completo y contraste v1
 - [x] 02-03-PLAN.md — `request_id` del proveedor registrado en toda corrida (SAFE-06) y clasificación de errores por código estable / por status en la cancelación (SAFE-05)
-- [ ] 02-04-PLAN.md — Un solo reintento en proceso con la misma llave, sólo cuando es seguro (SAFE-02), y documentación de comandos, agentes y README al día
+- [x] 02-04-PLAN.md — Un solo reintento en proceso con la misma llave, sólo cuando es seguro (SAFE-02), y documentación de comandos, agentes y README al día
 **Nota**: Todos los criterios de esta fase se comprueban sin red y sin credenciales; la respuesta real de staging del 9-sep entra al repositorio como fixture de contrato. `SAFE-01` queda acotado a las peticiones de cálculo: la cancelación no lleva `request_id` porque el contrato no lo documenta para ese endpoint y la operación es idempotente por naturaleza (decisión en `02-CONTEXT.md`).
 
 ### Phase 3: Verificación contra staging y corte documentado

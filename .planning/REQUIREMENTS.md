@@ -26,7 +26,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 ### Rieles anti-falla (SAFE)
 
 - [x] **SAFE-01**: Toda petición v2 lleva una llave de idempotencia única generada por nexgen
-- [ ] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
+- [x] **SAFE-02**: Un reintento tras timeout reutiliza la misma llave de idempotencia, de modo que no puede duplicar un registro fiscal
 - [x] **SAFE-03**: nexgen rechaza la corrida, antes de tocar la red, si el prefijo de la llave no corresponde al host configurado
 - [x] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
 - [x] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
@@ -117,7 +117,7 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | OPER-04 | Phase 1 | Complete |
 | OPER-05 | Phase 1 | Complete |
 | SAFE-01 | Phase 1 | Complete |
-| SAFE-02 | Phase 2 | Pending |
+| SAFE-02 | Phase 2 | Complete |
 | SAFE-03 | Phase 1 | Complete |
 | SAFE-04 | Phase 2 | Complete |
 | SAFE-05 | Phase 2 | Complete |
