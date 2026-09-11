@@ -20,6 +20,11 @@ const fakes = require('./helpers/fakes');
 // propia copia, así que la prueba unitaria tampoco depende del builder.
 const expectedIntent = { transaction_type: 'sales_estimate', committed: false };
 
+// La intención que devuelve SynexusRequestBuilder.getIntentFor('post_tax'): el
+// espejo exacto de la anterior. También literal: el validador compara contra lo
+// que recibe, así que sus reglas para post_tax se prueban sin el builder.
+const postTaxExpectedIntent = { transaction_type: 'sales_invoice', committed: true };
+
 // Cuerpo con forma v2, calcado del ejemplo de postman/synexus-v2-api.postman_collection.json.
 // Sin Committed, committed, transaction_type ni request_id: es exactamente el
 // archivo que deja el área de ERP, y el caso más importante de este archivo.
@@ -220,6 +225,47 @@ describe('validateV2IntentFields — método hermano de validateCommittedField, 
             body.request_id = '';
 
             expect(() => validator.validateV2IntentFields('get_tax', body, expectedIntent)).toThrow('"request_id"');
+        });
+    });
+
+    describe('con la intención de post_tax: las mismas reglas, con la intención invertida (OPER-02, OPER-04 bajo v2)', () => {
+        it('post_tax con committed: false lanza nombrando committed, la operación y el valor que debe llevar', () => {
+            const body = createV2Body();
+            body.committed = false;
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('"committed"');
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('post_tax');
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('debe ser true');
+        });
+
+        it('la comparación es estricta también aquí: committed "true" (cadena) contradice a true (booleano)', () => {
+            const body = createV2Body();
+            body.committed = 'true';
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('"committed"');
+        });
+
+        it('post_tax con transaction_type sales_estimate lanza citando el valor del archivo y el de la operación', () => {
+            const body = createV2Body();
+            body.transaction_type = 'sales_estimate';
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('sales_estimate');
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow('sales_invoice');
+        });
+
+        it('post_tax con committed: true y transaction_type sales_invoice (coincidentes) NO lanza', () => {
+            const body = createV2Body();
+            body.committed = true;
+            body.transaction_type = 'sales_invoice';
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).not.toThrow();
+        });
+
+        it('un archivo v1 con Committed: true bajo post_tax dispara la guardia de archivo v1, no la contradicción', () => {
+            const body = createV2Body();
+            body.Committed = true;
+
+            expect(() => validator.validateV2IntentFields('post_tax', body, postTaxExpectedIntent)).toThrow(v1FileGuardMessage);
         });
     });
 
@@ -460,14 +506,17 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
     });
 
     it('con una operación sin mapeo, getIntentFor aborta antes de validar la intención y de construir nada', async () => {
-        const noMappingMessage = 'La operación "post_tax" todavía no tiene mapeo de intención en el contrato v2';
+        // El doble lanza como lo hace el builder real con cancel_tax en este
+        // plan: no pasa por el mapeo de intención (el plan 02-02 le da su
+        // propio constructor). post_tax ya no sirve de ejemplo: tiene mapeo.
+        const noMappingMessage = 'La operación "cancel_tax" no pasa por el mapeo de intención del contrato v2';
         const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(createV2Body(), {
             getIntentFor: jest.fn(() => { throw new Error(noMappingMessage); })
         });
 
-        await expect(handler.execute(['post_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('post_tax');
+        await expect(handler.execute(['cancel_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('cancel_tax');
 
-        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('post_tax');
+        expect(requestBuilder.getIntentFor).toHaveBeenCalledWith('cancel_tax');
         expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(spies.validate).not.toHaveBeenCalled();
@@ -540,8 +589,40 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             expect(sentBody.committed).toBe(false);
         });
 
-        it('post_tax bajo v2 aborta en el mapeo de intención, sin validar intención y sin llegar a la guardia', async () => {
+        it('post_tax con un archivo v2 llega al cliente v2 con el cuerpo tipado como sales_invoice, committed true y request_id (OPER-02, TEST-02)', async () => {
             const { handler, spies, synexusApiClient } = buildRealHandler(createV2Body());
+
+            await expect(handler.execute(['post_tax', 'a.json', '--api-version=v2'])).resolves.toBeUndefined();
+
+            const trace = consoleLogSpy.mock.calls.find(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix));
+            expect(trace).toBeDefined();
+            const printedBody = JSON.parse(trace[0].slice(bodyTracePrefix.length));
+            expect(printedBody.transaction_type).toBe('sales_invoice');
+            expect(printedBody.transaction_type).not.toBe('sales_estimate');
+            expect(printedBody.committed).toBe(true);
+            expect(printedBody.request_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+            expect(spies.validate).not.toHaveBeenCalled();
+            expect(spies.validateCommittedField).not.toHaveBeenCalled();
+
+            // El validador recibió por identidad la intención que devolvió el builder
+            expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+            expect(spies.validateV2IntentFields.mock.calls[0][0]).toBe('post_tax');
+            expect(spies.validateV2IntentFields.mock.calls[0][2]).toEqual({ transaction_type: 'sales_invoice', committed: true });
+
+            // Lo que se emite es exactamente lo que se imprimió
+            expect(synexusApiClient.makeRequest).toHaveBeenCalledTimes(1);
+            const [operation, sentBody, entity] = synexusApiClient.makeRequest.mock.calls[0];
+            expect(operation).toBe('post_tax');
+            expect(entity).toBe('USA');
+            expect(sentBody).toEqual(printedBody);
+            expect(sentBody.transaction_type).toBe('sales_invoice');
+            expect(sentBody.committed).toBe(true);
+        });
+
+        it('post_tax con un archivo que contradice la confirmación (committed: false) aborta antes del cliente v2 (OPER-04 bajo v2)', async () => {
+            const body = createV2Body();
+            body.committed = false;
+            const { handler, spies, synexusApiClient } = buildRealHandler(body);
 
             let caught = null;
             try {
@@ -551,9 +632,10 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             }
 
             expect(caught).not.toBeNull();
-            expect(caught.message).toContain('post_tax');
+            expect(caught.message).toContain('"committed"');
+            expect(caught.message).toContain('debe ser true');
             expect(caught.message).not.toContain(wiringGuardMessage);
-            expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
+            expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
             expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
         });
     });

@@ -1,10 +1,15 @@
 // tests/synexusRequestBuilder.test.js
-// El cuerpo de la cotización v2 tal como lo arma nexgen, sin red:
-//   1. TEST-03 — la guardia de regresión de OPER-01 (los cuatro primeros casos).
-//   2. La llave de idempotencia (SAFE-01): formato UUID v4 y unicidad.
-//   3. getIntentFor como única fuente de verdad del mapeo, con throw terminal
-//      para toda operación sin mapeo (OPER-05).
-//   4. Un cuerpo con un campo de intención ausente nunca sale del builder.
+// El cuerpo de las dos operaciones de cálculo v2 tal como lo arma nexgen, sin red:
+//   1. TEST-03 — la guardia de regresión de OPER-01 (los cuatro primeros casos):
+//      la cotización no persiste nada.
+//   2. TEST-02 — la guardia espejo para post_tax (OPER-02): la confirmación
+//      registra una factura confirmada, no una cotización.
+//   3. La llave de idempotencia (SAFE-01): formato UUID v4 y unicidad.
+//   4. getIntentFor como única fuente de verdad del mapeo: get_tax y post_tax
+//      son las dos operaciones mapeadas (mismo endpoint, intención invertida);
+//      todo lo demás cae en el throw terminal (OPER-05). cancel_tax NO pasa
+//      por este mapeo: su cuerpo es una proyección con constructor propio.
+//   5. Un cuerpo con un campo de intención ausente nunca sale del builder.
 //
 // Ningún caso afirma nada sobre montos: los montos son de la Fase 2, y un
 // impuesto de 0.00 no es un fallo (la entidad de sandbox no tiene nexo).
@@ -89,6 +94,64 @@ describe('TEST-03 — guardia de regresión de OPER-01: la cotización no persis
 
         expect(body.transaction_type).toBe('sales_estimate');
         expect(body.committed).toBe(false);
+    });
+});
+
+describe('TEST-02 — guardia de regresión de OPER-02: la confirmación registra una factura confirmada, no una cotización', () => {
+    // ┌──────────────────────────────────────────────────────────────────────┐
+    // │ NO BORRAR NI DEBILITAR ESTOS CASOS. Son el espejo de TEST-03.        │
+    // │                                                                      │
+    // │ Un post_tax que saliera como sales_estimate, o con committed: false, │
+    // │ COTIZARÍA en vez de confirmar: el proveedor no registraría la        │
+    // │ factura, pero el ERP —que recibe un RESPONSE_ con montos y sin       │
+    // │ error— creería que sí quedó registrada. Es la inversión de cotizar   │
+    // │ y confirmar que OPER-04 prohíbe, vista desde el cuerpo que sale al   │
+    // │ cable.                                                               │
+    // │                                                                      │
+    // │ Los DOS campos son necesarios: sales_invoice con committed: false    │
+    // │ deja sólo un snapshot sin confirmar del lado del proveedor. Estos    │
+    // │ casos fallan en cuanto alguien toque el mapeo, no cuando el área de  │
+    // │ ERP concilie facturas que nunca existieron.                          │
+    // └──────────────────────────────────────────────────────────────────────┘
+
+    it('post_tax produce transaction_type igual a sales_invoice', () => {
+        const body = builder.buildRequestBody('post_tax', createV2Body());
+
+        expect(body.transaction_type).toBe('sales_invoice');
+    });
+
+    it('post_tax produce committed estrictamente igual a true (no basta con que sea truthy)', () => {
+        const body = builder.buildRequestBody('post_tax', createV2Body());
+
+        expect(body.committed).toBe(true);
+        expect(typeof body.committed).toBe('boolean');
+    });
+
+    it('post_tax NUNCA produce transaction_type sales_estimate — eso cotizaría sin registrar la factura', () => {
+        const body = builder.buildRequestBody('post_tax', createV2Body());
+
+        expect(body.transaction_type).not.toBe('sales_estimate');
+        expect(body.transaction_type).toBeDefined();
+    });
+
+    it('un archivo que ya trae transaction_type sales_estimate produce igualmente sales_invoice: la intención de nexgen gana', () => {
+        // En la corrida real validateV2IntentFields aborta antes por la
+        // contradicción; ésta es la regla del builder por sí mismo.
+        const input = createV2Body();
+        input.transaction_type = 'sales_estimate';
+        input.committed = false;
+
+        const body = builder.buildRequestBody('post_tax', input);
+
+        expect(body.transaction_type).toBe('sales_invoice');
+        expect(body.committed).toBe(true);
+    });
+
+    it('post_tax también lleva request_id con formato UUID v4: la llave de idempotencia no es sólo de la cotización (SAFE-01)', () => {
+        const body = builder.buildRequestBody('post_tax', createV2Body());
+
+        expect(typeof body.request_id).toBe('string');
+        expect(body.request_id).toMatch(uuidV4Pattern);
     });
 });
 
@@ -183,12 +246,21 @@ describe('getIntentFor — única fuente de verdad del mapeo operación → inte
         expect(intent).toEqual({ transaction_type: 'sales_estimate', committed: false });
     });
 
-    it('post_tax lanza nombrando la operación: no tiene mapeo de intención en esta fase (OPER-05)', () => {
-        expect(() => builder.getIntentFor('post_tax')).toThrow('post_tax');
-        expect(() => builder.getIntentFor('post_tax')).toThrow(/mapeo de intenci[oó]n/);
+    it('post_tax devuelve exactamente la intención de factura confirmada: sales_invoice y committed true (OPER-02)', () => {
+        const intent = builder.getIntentFor('post_tax');
+
+        expect(intent).toEqual({ transaction_type: 'sales_invoice', committed: true });
     });
 
-    it('cancel_tax lanza nombrando la operación: no tiene mapeo de intención en esta fase (OPER-05)', () => {
+    it('las dos intenciones mapeadas son opuestas en los dos campos: no hay forma de confundir cotizar con confirmar', () => {
+        const quote = builder.getIntentFor('get_tax');
+        const confirmation = builder.getIntentFor('post_tax');
+
+        expect(quote.transaction_type).not.toBe(confirmation.transaction_type);
+        expect(quote.committed).not.toBe(confirmation.committed);
+    });
+
+    it('cancel_tax lanza nombrando la operación: no pasa por el mapeo de intención (OPER-05)', () => {
         expect(() => builder.getIntentFor('cancel_tax')).toThrow('cancel_tax');
         expect(() => builder.getIntentFor('cancel_tax')).toThrow(/mapeo de intenci[oó]n/);
     });
@@ -198,17 +270,17 @@ describe('getIntentFor — única fuente de verdad del mapeo operación → inte
     });
 
     it('al lanzar usa el trío del repositorio: console.error + logger.error + throw', () => {
-        expect(() => builder.getIntentFor('post_tax')).toThrow();
+        expect(() => builder.getIntentFor('cancel_tax')).toThrow();
 
         expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
         expect(logger.error).toHaveBeenCalledTimes(1);
-        expect(logger.error.mock.calls[0][0]).toContain('post_tax');
+        expect(logger.error.mock.calls[0][0]).toContain('cancel_tax');
     });
 
     it('buildRequestBody con una operación sin mapeo lanza antes de construir nada', () => {
         const input = createV2Body();
 
-        expect(() => builder.buildRequestBody('post_tax', input)).toThrow('post_tax');
+        expect(() => builder.buildRequestBody('cancel_tax', input)).toThrow('cancel_tax');
         expect(input.request_id).toBeUndefined();
     });
 });

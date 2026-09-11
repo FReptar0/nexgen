@@ -2,7 +2,11 @@
 // Recorrido completo del CLI para los dos contratos, sin red y sin credenciales:
 // desde los argumentos hasta el archivo de respuesta, con el grafo de
 // dependencias armado A MANO igual que lo arma index.js (que no puede
-// requerirse: ejecuta main() al cargarse).
+// requerirse: ejecuta main() al cargarse). Cubre las dos operaciones de
+// cálculo bajo v2 —la cotización (get_tax) y la confirmación (post_tax), que
+// van al mismo endpoint con la intención invertida— y el camino v1 de
+// contraste. El nombre del archivo se conserva aunque ya no sea sólo de la
+// cotización: los SUMMARY, el review y el mapa del código lo citan.
 //
 // Sólo axios está sustituido. Todo lo demás es real: el Config singleton (las
 // variables ficticias de tests/setup.js ya lo permiten), el TaxValidator, el
@@ -62,6 +66,14 @@ const createProviderResponse = () => ({
     committed: false,
     total_tax: '0.00',
     exemption: { source: 'no_nexus' }
+});
+
+// La misma forma para una confirmación: lo que el proveedor devuelve cuando la
+// factura quedó registrada. El cero sigue sin ser defecto (no_nexus).
+const createConfirmedProviderResponse = () => Object.assign(createProviderResponse(), {
+    id: 'txn_demo_002',
+    transaction_type: 'sales_invoice',
+    committed: true
 });
 
 let originalTaxApiVersion;
@@ -246,6 +258,132 @@ describe('Recorrido completo — cotización v2 (get_tax --api-version=v2 --enti
                 expect(String(arg)).not.toContain(v2ApiKey);
             });
         });
+    });
+});
+
+describe('Recorrido completo — confirmación v2 (post_tax --api-version=v2 --entity=USA) (OPER-02, TEST-02)', () => {
+    // El espejo del describe anterior: misma ruta de cálculo, intención
+    // invertida. Cada aserción de intención va con su negación explícita,
+    // porque lo que protege es que confirmar no cotice ni cotizar confirme.
+    const args = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
+    let graph;
+    let providerResponse;
+    let axiosCallArgument;
+
+    beforeEach(async () => {
+        providerResponse = createConfirmedProviderResponse();
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, providerResponse));
+        graph = buildGraph(args, createV2Body());
+
+        await graph.handler.execute(args);
+        axiosCallArgument = axios.mock.calls.length > 0 ? axios.mock.calls[0][0] : undefined;
+    });
+
+    it('axios se llama exactamente una vez, con el método POST (CONN-01)', () => {
+        expect(axios).toHaveBeenCalledTimes(1);
+        expect(axiosCallArgument).toBeDefined();
+        expect(axiosCallArgument.method).toBe('POST');
+    });
+
+    it('contra la MISMA ruta de cálculo que usa get_tax, sin credencial en la URL (CONN-04, CONN-02)', () => {
+        expect(axiosCallArgument.url).toBe(v2CalculationUrl);
+        expect(axiosCallArgument.url).not.toContain('code=');
+        expect(axiosCallArgument.url).not.toContain(v2ApiKey);
+    });
+
+    it('con el cuerpo tipado como factura confirmada: transaction_type sales_invoice y committed true (OPER-02, TEST-02)', () => {
+        expect(axiosCallArgument.data.transaction_type).toBe('sales_invoice');
+        expect(axiosCallArgument.data.committed).toBe(true);
+        expect(typeof axiosCallArgument.data.committed).toBe('boolean');
+    });
+
+    it('y NUNCA como estimación: transaction_type no es sales_estimate (TEST-02, la negación)', () => {
+        expect(axiosCallArgument.data.transaction_type).not.toBe('sales_estimate');
+        expect(axiosCallArgument.data.committed).not.toBe(false);
+    });
+
+    it('con request_id UUID v4: la llave de idempotencia también viaja en la confirmación (SAFE-01)', () => {
+        expect(typeof axiosCallArgument.data.request_id).toBe('string');
+        expect(axiosCallArgument.data.request_id).toMatch(uuidV4Pattern);
+    });
+
+    it('con la llave en Authorization: Bearer y la entidad del flag en X-Synexus-Entity (CONN-02, CONN-03)', () => {
+        expect(axiosCallArgument.headers.Authorization).toBe(`Bearer ${v2ApiKey}`);
+        expect(axiosCallArgument.headers['X-Synexus-Entity']).toBe('USA');
+    });
+
+    it('la respuesta del proveedor se escribe por identidad con el nombre RESPONSE_<archivo>', () => {
+        expect(graph.fileManager.writeJsonFile).toHaveBeenCalledTimes(1);
+        const [writtenPath, writtenData] = graph.fileManager.writeJsonFile.mock.calls[0];
+        expect(writtenPath).toBe(path.join(config.getOutputDir(), 'RESPONSE_a.json'));
+        expect(writtenData).toBe(providerResponse);
+    });
+
+    it('la corrida termina con el mensaje de éxito del CLI nombrando post_tax', () => {
+        expect(consoleLogSpy).toHaveBeenCalledWith('Operación post_tax completada exitosamente');
+        expect(consoleLogSpy).toHaveBeenCalledWith('SUCCESS: post_tax - File: a.json');
+    });
+
+    it('la llave completa no aparece en ninguna línea de consola ni del logger (CFG-05)', () => {
+        const output = capturedConsoleOutput();
+        expect(output.length).toBeGreaterThan(0);
+        output.forEach(line => {
+            expect(line).not.toContain(v2ApiKey);
+        });
+        graph.logger.error.mock.calls.forEach(call => {
+            call.forEach(arg => {
+                expect(String(arg)).not.toContain(v2ApiKey);
+            });
+        });
+    });
+});
+
+describe('Recorrido completo — el archivo que contradice la confirmación o parece de v1 bajo post_tax (OPER-04 bajo v2)', () => {
+    const args = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
+
+    it('un archivo v2 con committed: false bajo post_tax lanza nombrando committed y "debe ser true"; axios no se llama y no se escribe archivo', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, createConfirmedProviderResponse()));
+        const graph = buildGraph(args, createV2Body({ committed: false }));
+
+        let caught = null;
+        try {
+            await graph.handler.execute(args);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message).toContain('"committed"');
+        expect(caught.message).toContain('post_tax');
+        expect(caught.message).toContain('debe ser true');
+        expect(axios).not.toHaveBeenCalled();
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+    });
+
+    it('un archivo v2 con transaction_type: sales_estimate bajo post_tax lanza citando sales_estimate y axios no se llama', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, createConfirmedProviderResponse()));
+        const graph = buildGraph(args, createV2Body({ transaction_type: 'sales_estimate' }));
+
+        await expect(graph.handler.execute(args)).rejects.toThrow('sales_estimate');
+        expect(axios).not.toHaveBeenCalled();
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+    });
+
+    it('un archivo del contrato v1 (Committed: true) con post_tax --api-version=v2 lanza "parece del contrato v1" y axios no se llama', async () => {
+        axios.mockResolvedValue(fakes.createAxiosResponse(200, createConfirmedProviderResponse()));
+        const graph = buildGraph(args, { Committed: true, cartID: 'CART-1', ToState: 'TX', cart: [] });
+
+        let caught = null;
+        try {
+            await graph.handler.execute(args);
+        } catch (error) {
+            caught = error;
+        }
+
+        expect(caught).not.toBeNull();
+        expect(caught.message).toContain('parece del contrato v1');
+        expect(axios).not.toHaveBeenCalled();
+        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
     });
 });
 
@@ -436,15 +574,6 @@ describe('Recorrido completo — el archivo que contradice la operación o parec
         expect(caught.message).toContain('parece del contrato v1');
         expect(axios).not.toHaveBeenCalled();
         expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
-    });
-
-    it('post_tax bajo v2 aborta en el mapeo de intención (OPER-05) y axios no se llama', async () => {
-        const postArgs = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
-        axios.mockResolvedValue(fakes.createAxiosResponse(200, createProviderResponse()));
-        const graph = buildGraph(postArgs, createV2Body());
-
-        await expect(graph.handler.execute(postArgs)).rejects.toThrow('todavía no tiene mapeo de intención');
-        expect(axios).not.toHaveBeenCalled();
     });
 });
 
