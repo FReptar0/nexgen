@@ -112,6 +112,47 @@ class TaxValidator {
     }
 
     /**
+     * Valida la forma del archivo bajo el contrato v2, antes de resolver la
+     * entidad: que sea un objeto —no un arreglo— y que no sea del contrato v1.
+     *
+     * Lo llama únicamente _executeV2, para las tres operaciones —incluida la
+     * cancelación, que no pasa por validateV2IntentFields (plan 02-02)—. NO
+     * forma parte de validate(): v1 sigue usando validateRequestBody, que
+     * acepta arreglos, y COMP-01 lo protege. validateV2IntentFields conserva
+     * su propia guardia de Committed como defensa en profundidad
+     * @param {*} requestBody - Cuerpo de la petición, tal como salió de readJsonFile
+     * @throws {Error} Si el cuerpo es un arreglo (WR-04) o si el archivo parece del contrato v1
+     */
+    validateV2FileShape(requestBody) {
+        // 1. Un arreglo raíz pasa validateRequestBody (typeof [] === 'object'),
+        //    pero en la rama v2 se esparciría como { "0": {...} } y saldría así
+        //    a la red (WR-04). Se comprueba primero: es la causa raíz, y un
+        //    arreglo de archivos v1 debe diagnosticarse como arreglo.
+        if (Array.isArray(requestBody)) {
+            const errorMsg = 'El archivo de entrada debe ser un objeto JSON, no un arreglo: ' +
+                'bajo el contrato v2 un arreglo se esparciría como { "0": {...} } y saldría así a la red. ' +
+                'Deje en el archivo un solo objeto con la transacción.';
+            console.error(errorMsg);
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+
+        // 2. Guardia de archivo v1, copiada literal del paso 1 de
+        //    validateV2IntentFields (copiada, no referenciada: la duplicación
+        //    de cuatro líneas es el precio de que el diff de este archivo sea
+        //    sólo adiciones, la prueba mecánica de que nada congelado se movió).
+        //    Aquí corre ANTES de resolver la entidad: un archivo v1 bajo v2
+        //    aborta con la causa raíz, no con "no se pudo resolver la entidad".
+        if (requestBody.Committed !== undefined) {
+            const errorMsg = `El archivo trae el campo "Committed" (con mayúscula), que es del contrato v1: el archivo parece del contrato v1. ` +
+                'O el archivo está en forma v1, o el selector debería ser v1 (--api-version=v1 o TAX_API_VERSION=v1).';
+            console.error(errorMsg);
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+        }
+    }
+
+    /**
      * Valida que el cuerpo de la petición sea un objeto válido
      * @param {Object} requestBody - Cuerpo de la petición
      * @throws {Error} Si el cuerpo no es válido

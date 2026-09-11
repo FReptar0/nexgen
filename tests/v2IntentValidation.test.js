@@ -598,14 +598,21 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });
 
-    it('con un archivo del contrato v1 bajo la rama v2, lanza el mensaje de la guardia y buildRequestBody no se llama', async () => {
-        const { handler, spies, requestBuilder, synexusApiClient } = buildHandler(createV1Body());
+    it('con un archivo del contrato v1 bajo la rama v2, lanza el mensaje de la guardia desde validateV2FileShape, ANTES de resolver la entidad (IN-08), y buildRequestBody no se llama', async () => {
+        // Hasta la Fase 1 la guardia de archivo v1 corría en validateV2IntentFields,
+        // después de resolver la entidad: un archivo v1 sin entidad resoluble
+        // abortaba con el síntoma y no con la causa raíz. Desde WR-04 la forma
+        // del archivo se comprueba en el paso 2 y la guardia de
+        // validateV2IntentFields queda como defensa en profundidad.
+        const { handler, spies, requestBuilder, synexusConfig, synexusApiClient } = buildHandler(createV1Body());
 
         await expect(runV2(handler)).rejects.toThrow(v1FileGuardMessage);
 
         expect(spies.validate).not.toHaveBeenCalled();
         expect(spies.validateCommittedField).not.toHaveBeenCalled();
-        expect(spies.validateV2IntentFields).toHaveBeenCalledTimes(1);
+        expect(spies.validateV2FileShape).toHaveBeenCalledTimes(1);
+        expect(synexusConfig.resolveEntityCode).not.toHaveBeenCalled();
+        expect(spies.validateV2IntentFields).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
     });

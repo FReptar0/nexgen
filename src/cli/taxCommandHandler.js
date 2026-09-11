@@ -190,33 +190,45 @@ class TaxCommandHandler {
     }
 
     /**
-     * Rama v2 de execute(): valida y sanea por separado, resuelve la entidad,
-     * anuncia el perfil efectivo, valida la intención del archivo contra la de
-     * la operación, construye el cuerpo tipado, lo imprime, pasa la guardia de
-     * cableado y emite la petición con el cliente v2.
+     * Rama v2 de execute(): valida el cuerpo y la forma del archivo, resuelve
+     * la entidad, anuncia el perfil efectivo, valida la intención del archivo
+     * contra la de la operación, construye el cuerpo tipado, lo imprime, pasa
+     * la guardia de cableado y emite la petición con el cliente v2.
      *
      * No usa el agregador del validador porque el archivo v2 no trae el campo
      * Committed —es del contrato v1— y la validación de ese campo rechazaría todo
-     * archivo v2 real. validateOperation no se repite: ya corrió en el paso 2,
-     * común a los dos contratos. La validación estricta de v2 es
+     * archivo v2 real. Tampoco sanea: el cuerpo viaja CRUDO (ver el paso 2).
+     * validateOperation no se repite: ya corrió en el paso 2 de execute, común
+     * a los dos contratos. La validación estricta de v2 es
      * validateV2IntentFields, con la intención que devuelve el builder.
      * @private
      * @param {string} operation - Operación ya validada
      * @param {Object} requestBody - Cuerpo CRUDO, tal como salió de readJsonFile
      * @param {string|undefined} entityCode - Valor del flag --entity=, si se dio
      * @returns {Promise<Object>} Respuesta del proveedor v2, tal cual la devolvió el cliente
-     * @throws {Error} Si el cuerpo no es un objeto, si la entidad no se resuelve, si la operación no tiene
-     *   mapeo de intención, si el archivo contradice la operación, si falta el cliente v2, o si la petición falla
+     * @throws {Error} Si el cuerpo no es un objeto, si es un arreglo o parece de v1, si la entidad no se
+     *   resuelve, si la operación no tiene mapeo de intención, si el archivo contradice la operación,
+     *   si falta el cliente v2, o si la petición falla
      */
     async _executeV2(operation, requestBody, entityCode) {
         // 1. Mismo freno que v1: un cuerpo nulo debe fallar en español, no con un TypeError
         this.validator.validateRequestBody(requestBody);
 
-        // 2. Mismo saneado de apóstrofos que v1, llamado por separado
-        const sanitizedRequestBody = this.validator.sanitizeStringFields(requestBody);
+        // 2. La forma del archivo bajo v2: objeto —no arreglo— y no de v1. Va
+        //    ANTES de resolver la entidad, así que un archivo v1 bajo v2 aborta
+        //    con la causa raíz y no con "no se pudo resolver el código de entidad"
+        //    (IN-08 del review de la Fase 1).
+        //
+        //    La rama v2 NO sanea (WR-03). sanitizeStringFields sustituye ' por \'
+        //    y nació como parche de la API legada de v1; en el cable v2
+        //    JSON.stringify escapa la barra y el proveedor recibiría literalmente
+        //    O\'Brien en sus registros fiscales. JSON ya sabe entrecomillar: los
+        //    strings del archivo viajan tal cual. v1 sigue saneando vía
+        //    validate() y COMP-01 lo protege.
+        this.validator.validateV2FileShape(requestBody);
 
-        // 3. Resolver la entidad sobre el cuerpo ya saneado: entity_id es una de sus tres vías
-        const resolvedEntityCode = this.synexusConfig.resolveEntityCode(entityCode, sanitizedRequestBody);
+        // 3. Resolver la entidad sobre el cuerpo crudo: entity_id es una de sus tres vías
+        const resolvedEntityCode = this.synexusConfig.resolveEntityCode(entityCode, requestBody);
 
         // 4. Anunciar el perfil efectivo antes de cualquier salida a la red
         this.synexusConfig.printProfile(resolvedEntityCode);
@@ -228,11 +240,11 @@ class TaxCommandHandler {
         // 6. Validar antes de construir: un archivo que contradice la operación (o
         //    que parece de v1) aborta antes de que exista un cuerpo. La intención
         //    que se compara es la MISMA que devolvió el builder: una sola fuente
-        this.validator.validateV2IntentFields(operation, sanitizedRequestBody, intent);
+        this.validator.validateV2IntentFields(operation, requestBody, intent);
 
         // 7. Construir el cuerpo tipado y mostrarlo: es lo que permite al operador
         //    verificar el tipado antes de que salga. No lleva credencial alguna
-        const v2RequestBody = this.requestBuilder.buildRequestBody(operation, sanitizedRequestBody);
+        const v2RequestBody = this.requestBuilder.buildRequestBody(operation, requestBody);
         console.log(`Cuerpo v2 a enviar: ${JSON.stringify(v2RequestBody, null, 2)}`);
 
         // 8. Guardia de cableado. No es un andamio: el cliente v2 ya se inyecta
