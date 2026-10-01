@@ -512,7 +512,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.buildRequestBody).toHaveBeenCalledTimes(1);
         expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(true);
         expect(apiClient.makeRequest).not.toHaveBeenCalled();
-        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(fileManager.writeJsonFile);
     });
 
     it('pasa al validador la operación, el cuerpo CRUDO por identidad y la MISMA intención que devolvió el builder', async () => {
@@ -543,7 +543,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.buildRequestBody.mock.calls[0][1].customer_id).not.toContain('\\');
     });
 
-    it('con readJsonFile devolviendo un arreglo bajo v2, rechaza con "no un arreglo" antes de resolver la entidad y sin emitir ni escribir nada (WR-04)', async () => {
+    it('con readJsonFile devolviendo un arreglo bajo v2, rechaza con "no un arreglo" antes de resolver la entidad y sin emitir nada y dejando el detalle de nexgen en el archivo (WR-04)', async () => {
         const { handler, spies, requestBuilder, synexusConfig, synexusApiClient, fileManager } = buildHandler([createV2Body()]);
 
         await expect(runV2(handler)).rejects.toThrow('no un arreglo');
@@ -554,7 +554,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
         expect(requestBuilder.getIntentFor).not.toHaveBeenCalled();
         expect(requestBuilder.buildRequestBody).not.toHaveBeenCalled();
         expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
-        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(fileManager.writeJsonFile);
     });
 
     it('imprime el cuerpo construido en la salida estándar, con JSON indentado a dos espacios, antes de emitir', async () => {
@@ -751,10 +751,10 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
 
             expect(requestBuilder.buildCancelBody).not.toHaveBeenCalled();
             expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
-            expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+            fakes.expectNexgenErrorResponseWritten(fileManager.writeJsonFile);
         });
 
-        it('si buildCancelBody lanza (falta invoice_id), makeRequest no se llama, no se imprime la traza del cuerpo y no se escribe archivo', async () => {
+        it('si buildCancelBody lanza (falta invoice_id), makeRequest no se llama, no se imprime la traza del cuerpo y el archivo lleva el detalle de nexgen', async () => {
             const missingMessage = 'Para cancelar bajo el contrato v2 el archivo debe traer "invoice_id" y "customer_id"; falta(n): invoice_id.';
             const { handler, requestBuilder, synexusApiClient, fileManager } = buildHandler(createV2Body(), {
                 buildCancelBody: jest.fn(() => { throw new Error(missingMessage); })
@@ -765,7 +765,7 @@ describe('Rama v2 de execute() — el recorrido de _executeV2 con el TaxValidato
             expect(requestBuilder.buildCancelBody).toHaveBeenCalledTimes(1);
             expect(synexusApiClient.makeRequest).not.toHaveBeenCalled();
             expect(consoleLogSpy.mock.calls.some(call => typeof call[0] === 'string' && call[0].startsWith(bodyTracePrefix))).toBe(false);
-            expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+            fakes.expectNexgenErrorResponseWritten(fileManager.writeJsonFile);
         });
 
         it('la respuesta de cancelación viaja por identidad al mismo _saveResponse que el cálculo', async () => {

@@ -353,7 +353,7 @@ describe('Recorrido completo — confirmación v2 (post_tax --api-version=v2 --e
 describe('Recorrido completo — el archivo que contradice la confirmación o parece de v1 bajo post_tax (OPER-04 bajo v2)', () => {
     const args = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
 
-    it('un archivo v2 con committed: false bajo post_tax lanza nombrando committed y "debe ser true"; axios no se llama y no se escribe archivo', async () => {
+    it('un archivo v2 con committed: false bajo post_tax lanza nombrando committed y "debe ser true"; axios no se llama y el archivo lleva el detalle de nexgen', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, createConfirmedProviderResponse()));
         const graph = buildGraph(args, createV2Body({ committed: false }));
 
@@ -369,7 +369,7 @@ describe('Recorrido completo — el archivo que contradice la confirmación o pa
         expect(caught.message).toContain('post_tax');
         expect(caught.message).toContain('debe ser true');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
     it('un archivo v2 con transaction_type: sales_estimate bajo post_tax lanza citando sales_estimate y axios no se llama', async () => {
@@ -378,7 +378,7 @@ describe('Recorrido completo — el archivo que contradice la confirmación o pa
 
         await expect(graph.handler.execute(args)).rejects.toThrow('sales_estimate');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
     it('un archivo del contrato v1 (Committed: true) con post_tax --api-version=v2 lanza "parece del contrato v1" y axios no se llama', async () => {
@@ -395,7 +395,7 @@ describe('Recorrido completo — el archivo que contradice la confirmación o pa
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('parece del contrato v1');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 });
 
@@ -537,7 +537,7 @@ describe('Recorrido completo — precedencia del código de entidad de punta a p
         expect(caught.message).toContain('SYNEXUS_ENTITY');
         expect(caught.message).toContain('entity_id');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 });
 
@@ -560,7 +560,7 @@ describe('Recorrido completo — el archivo que contradice la operación o parec
         expect(caught.message).toContain('get_tax');
         expect(caught.message).toContain('debe ser false');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
     it('un archivo v2 con transaction_type: sales_invoice bajo get_tax lanza la contradicción y axios no se llama', async () => {
@@ -585,7 +585,7 @@ describe('Recorrido completo — el archivo que contradice la operación o parec
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('parece del contrato v1');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 });
 
@@ -623,7 +623,7 @@ describe('WR-03 y WR-04 — lo que sale al cable v2 no se escapa y un arreglo no
         expect(call.data.Address).not.toBe("O'Brien St");
     });
 
-    it('con readJsonFile devolviendo un arreglo raíz bajo v2, la corrida rechaza con "no un arreglo" en español, axios no se llama y no se escribe archivo (WR-04)', async () => {
+    it('con readJsonFile devolviendo un arreglo raíz bajo v2, la corrida rechaza con "no un arreglo" en español, axios no se llama y el archivo lleva el detalle de nexgen (WR-04)', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, createProviderResponse()));
         const graph = buildGraph(v2Args, [createV2Body()]);
 
@@ -637,20 +637,21 @@ describe('WR-03 y WR-04 — lo que sale al cable v2 no se escapa y un arreglo no
         expect(caught).not.toBeNull();
         expect(caught.message.startsWith('El archivo de entrada debe ser un objeto JSON, no un arreglo')).toBe(true);
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 });
 
 describe('Recorrido completo — el camino de error del proveedor v2 tampoco filtra la llave, y llega clasificado por código con su request_id (SAFE-05, SAFE-06)', () => {
     const args = ['get_tax', 'a.json', '--api-version=v2', '--entity=USA'];
 
-    it('con un 422 tax_code_missing del proveedor, la corrida lanza "Error HTTP 422 (tax_code_missing)" con request_id=rid-422, lo registra, no escribe archivo y la llave no sale', async () => {
-        axios.mockResolvedValue(fakes.createAxiosResponse(422, {
+    it('con un 422 tax_code_missing del proveedor, la corrida lanza "Error HTTP 422 (tax_code_missing)" con request_id=rid-422, lo registra, archiva el cuerpo del proveedor tal cual en RESPONSE_ y la llave no sale', async () => {
+        const providerBody = {
             error: 'unprocessable',
             code: 'tax_code_missing',
             message: 'tax_code is required',
             request_id: 'rid-422'
-        }));
+        };
+        axios.mockResolvedValue(fakes.createAxiosResponse(422, providerBody));
         const graph = buildGraph(args, createV2Body());
 
         let caught = null;
@@ -666,7 +667,7 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
         expect(caught.message).toContain('Mensaje del proveedor: "tax_code is required"');
         expect(caught.message).toContain('request_id=rid-422');
         expect(graph.logger.error.mock.calls.some(call => String(call[0]).includes('rid-422'))).toBe(true);
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectProviderErrorResponseWritten(graph.fileManager.writeJsonFile, providerBody);
         capturedConsoleOutput().forEach(line => {
             expect(line).not.toContain(v2ApiKey);
         });
@@ -677,9 +678,10 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
         });
     });
 
-    it('post_tax con un 401 invalid_key lanza "Error HTTP 401 (invalid_key)" nombrando SYNEXUS_API_KEY, sin escribir archivo', async () => {
+    it('post_tax con un 401 invalid_key lanza "Error HTTP 401 (invalid_key)" nombrando SYNEXUS_API_KEY, y archiva el cuerpo del proveedor tal cual', async () => {
         const postArgs = ['post_tax', 'a.json', '--api-version=v2', '--entity=USA'];
-        axios.mockResolvedValue(fakes.createAxiosResponse(401, { error: 'unauthorized', code: 'invalid_key', message: 'Unauthorized' }));
+        const providerBody = { error: 'unauthorized', code: 'invalid_key', message: 'Unauthorized' };
+        axios.mockResolvedValue(fakes.createAxiosResponse(401, providerBody));
         const graph = buildGraph(postArgs, createV2Body());
 
         let caught = null;
@@ -694,7 +696,7 @@ describe('Recorrido completo — el camino de error del proveedor v2 tampoco fil
         expect(caught.message).toContain('SYNEXUS_API_KEY');
         expect(caught.message).toContain('Mensaje del proveedor: "Unauthorized"');
         expect(axios).toHaveBeenCalledTimes(1);
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectProviderErrorResponseWritten(graph.fileManager.writeJsonFile, providerBody);
         capturedConsoleOutput().forEach(line => {
             expect(line).not.toContain(v2ApiKey);
         });
@@ -773,13 +775,14 @@ describe('SAFE-02 de punta a punta — el reintento reutiliza la llave', () => {
         });
     });
 
-    it('post_tax con 409 idempotency_key_conflict: axios una sola vez, rechaza con el código, no escribe archivo', async () => {
-        axios.mockResolvedValue(fakes.createAxiosResponse(409, {
+    it('post_tax con 409 idempotency_key_conflict: axios una sola vez, rechaza con el código y archiva el cuerpo del proveedor tal cual', async () => {
+        const providerBody = {
             error: 'conflict',
             code: 'idempotency_key_conflict',
             message: 'request_id already used with a different payload',
             request_id: 'rid-409-e2e'
-        }));
+        };
+        axios.mockResolvedValue(fakes.createAxiosResponse(409, providerBody));
         const graph = buildGraph(postArgs, createV2Body());
 
         let caught = null;
@@ -795,6 +798,6 @@ describe('SAFE-02 de punta a punta — el reintento reutiliza la llave', () => {
         expect(caught.message).toContain('request_id=rid-409-e2e');
         expect(axios).toHaveBeenCalledTimes(1);
         expect(capturedConsoleOutput().some(line => line.startsWith('Reintentando'))).toBe(false);
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectProviderErrorResponseWritten(graph.fileManager.writeJsonFile, providerBody);
     });
 });

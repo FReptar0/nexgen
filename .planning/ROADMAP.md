@@ -39,6 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Camino v2 de punta a punta para una cotización** ✓ 2026-09-11 - Red de seguridad que congela v1, arranque con frenos antes de la red, y `get_tax` migrada sin dejar rastro en el proveedor
 - [x] **Phase 2: Confirmar, cancelar y devolver la respuesta íntegra** ✓ 2026-09-11 - `post_tax` y `cancel_tax` migradas, y la respuesta v2 llegando sin pérdida al archivo que lee el ERP
+- [x] **Phase 2.1: El archivo de respuesta también se escribe cuando falla** (INSERTED) ✓ 2026-10-01 - Petición del área de ERP del 1-oct: su proceso lee un solo archivo, así que un fallo tampoco puede dejarlo sin escribir
 - [ ] **Phase 3: Verificación contra staging y corte documentado** - Procedimiento que el área de ERP ejecuta desde el servidor, más la lista de corte a producción
 
 ## Phase Details
@@ -84,6 +85,20 @@ Plans:
 - [x] 02-04-PLAN.md — Un solo reintento en proceso con la misma llave, sólo cuando es seguro (SAFE-02), y documentación de comandos, agentes y README al día
 **Nota**: Todos los criterios de esta fase se comprueban sin red y sin credenciales; la respuesta real de staging del 9-sep entra al repositorio como fixture de contrato. `SAFE-01` queda acotado a las peticiones de cálculo: la cancelación no lleva `request_id` porque el contrato no lo documenta para ese endpoint y la operación es idempotente por naturaleza (decisión en `02-CONTEXT.md`).
 
+### Phase 2.1: El archivo de respuesta también se escribe cuando falla (INSERTED)
+**Goal**: Que una corrida v2 fallida deje el mismo archivo que lee el ERP, con lo que haya devuelto el proveedor
+**Mode:** quick
+**Depends on**: Phase 2
+**Requirements**: SAFE-07
+**Success Criteria** (what must be TRUE):
+  1. Una corrida v2 que falla escribe `RESPONSE_<nombre original>` en el directorio de salida, con el mismo nombre, el mismo prefijo y la misma numeración que una exitosa
+  2. Si el proveedor respondió, el archivo lleva su cuerpo tal cual —íntegro, incluido `docs_url`, y también cuando no es JSON—; si no respondió, lleva un objeto de nexgen que no se parece a un cálculo y que cita la llave de idempotencia generada
+  3. Escribir el archivo no cambia el desenlace: el código de salida sigue siendo 1, y si la escritura misma falla, el error que se reporta es el original
+  4. Ninguna credencial llega al archivo por ninguna de las dos vías
+  5. v1 no cambia: una corrida v1 fallida no escribe nada
+**Plans**: ninguno — ejecutado en línea (el repo no da para más ceremonia; ver memoria `calibrar-ceremonia-al-tamano-del-proyecto`)
+**Nota**: El origen es la reunión del 1-oct (`data/nota-v2.md`, 00:07:49). El área de ERP lee un solo archivo y sólo ése: *"igual igual, porque como nada más leo ese archivo"*. Sin esto, una corrida fallida dejaba el `RESPONSE_` de una corrida anterior, y el ERP leía números viejos como si fueran de ahora.
+
 ### Phase 3: Verificación contra staging y corte documentado
 **Goal**: El área de ERP puede validar las tres operaciones contra staging siguiendo un procedimiento escrito, y queda con una lista de verificación para decidir y ejecutar el corte a producción
 **Mode:** mvp
@@ -105,6 +120,7 @@ Las fases se ejecutan en orden numérico: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Camino v2 de punta a punta para una cotización | 4/4 | Complete | 2026-09-11 |
 | 2. Confirmar, cancelar y devolver la respuesta íntegra | 4/4 | Complete | 2026-09-11 |
+| 2.1 El archivo de respuesta también se escribe cuando falla | — | Complete | 2026-10-01 |
 | 3. Verificación contra staging y corte documentado | 0/TBD | Not started | - |
 
 ## Cobertura de requisitos
@@ -143,11 +159,13 @@ Las fases se ejecutan en orden numérico: 1 → 2 → 3
 | TEST-05 | Phase 1 |
 | TEST-06 | Phase 1 |
 | VERIF-01 | Phase 2 |
+| SAFE-07 | Phase 2.1 |
 | VERIF-02 | Phase 3 |
 | VERIF-03 | Phase 3 |
 | VERIF-04 | Phase 3 |
 
-**Cobertura: 35/35 requisitos v1 mapeados. Cero huérfanos, cero duplicados.**
+**Cobertura: 36/36 requisitos mapeados. Cero huérfanos, cero duplicados.**
+(35 del alcance original + SAFE-07, insertado el 1-oct a petición del área de ERP.)
 
 ---
 *Roadmap creado: 2026-09-10*

@@ -31,6 +31,7 @@ Requisitos de esta migración. Cada uno mapea a una fase del roadmap.
 - [x] **SAFE-04**: Los montos y tasas de la respuesta se preservan tal cual llegan, sin conversión a punto flotante en ningún punto del camino
 - [x] **SAFE-05**: Los errores del contrato v2 se clasifican por su código estable, no por el texto del mensaje
 - [x] **SAFE-06**: El identificador de petición que devuelve el proveedor queda registrado en toda corrida, exitosa o fallida, para poder levantar soporte
+- [x] **SAFE-07**: Bajo v2, una corrida fallida también escribe el archivo de respuesta que lee el ERP —mismo nombre, mismo prefijo `RESPONSE_`, sin sufijo ni prefijo distinto—: el cuerpo del proveedor tal cual cuando respondió, y un objeto propio de nexgen cuando no. Escribirlo nunca enmascara el error original ni cambia el código de salida. (Pedido por el área de ERP el 1-oct-2026)
 
 ### Configuración (CFG)
 
@@ -138,6 +139,7 @@ Cada requisito v1 mapea a exactamente una fase de `.planning/ROADMAP.md`.
 | TEST-05 | Phase 1 | Complete |
 | TEST-06 | Phase 1 | Complete |
 | VERIF-01 | Phase 2 | Complete |
+| SAFE-07 | Phase 2.1 | Done |
 | VERIF-02 | Phase 3 | Pending |
 | VERIF-03 | Phase 3 | Pending |
 | VERIF-04 | Phase 3 | Pending |

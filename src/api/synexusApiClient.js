@@ -81,7 +81,46 @@ class SynexusApiClient {
             return this._handleResponse(response, url, operation);
         } catch (error) {
             this._handleError(error, url, operation, requestBody);
+            // Después del diagnóstico, nunca antes: _handleError deriva
+            // providerResponded de error.response y marcarlo aquí cambiaría su
+            // lectura. Se MUTA el error, no se envuelve: las pruebas de
+            // identidad (rejects.toBe) siguen en pie.
+            this._attachProviderResponseBody(error);
             throw error;
+        }
+    }
+
+    /**
+     * Deja en el error el cuerpo con que respondió el proveedor, para que la
+     * capa CLI pueda archivarlo en el RESPONSE_ que lee el ERP aunque la
+     * corrida falle.
+     *
+     * Dos orígenes, una sola propiedad:
+     *   - 4xx: lo puso _handleResponse antes de lanzar; aquí no se toca.
+     *   - 5xx: axios rechazó y el cuerpo viene en error.response.data.
+     * Sin respuesta (timeout, red, DNS) no hay nada que adjuntar y la
+     * propiedad queda ausente: quien archive sabrá que el cuerpo no es del
+     * proveedor.
+     *
+     * De error.response se leen SÓLO data y, vía _extractProviderRequestId, el
+     * header x-request-id. Nunca error.config ni response.config: llevan la
+     * llave portadora (CFG-05).
+     * @private
+     * @param {Error} error - Error capturado; se le añaden propiedades
+     */
+    _attachProviderResponseBody(error) {
+        if (error.providerResponseBody !== undefined) {
+            return;
+        }
+
+        if (!error.response || error.response.data === undefined) {
+            return;
+        }
+
+        error.providerResponseBody = error.response.data;
+        error.providerResponded = true;
+        if (error.providerRequestId === undefined || error.providerRequestId === null) {
+            error.providerRequestId = this._extractProviderRequestId(error.response);
         }
     }
 
@@ -479,6 +518,11 @@ class SynexusApiClient {
             const error = new Error(errorMsg);
             error.providerResponded = true;
             error.providerRequestId = providerRequestId;
+            // El cuerpo tal cual lo mandó el proveedor, SIN filtrar: va al
+            // archivo RESPONSE_ que lee el ERP, y ahí no se recorta nada. El
+            // filtro de docs_url es sólo para consola y para el mensaje del
+            // Error; lo que se archiva es la respuesta íntegra.
+            error.providerResponseBody = data;
             throw error;
         }
 

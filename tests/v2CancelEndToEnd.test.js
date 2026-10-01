@@ -341,7 +341,7 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
         }
     };
 
-    it('sin invoice_id en el archivo: rechaza nombrando invoice_id; axios no se llama; no se escribe archivo', async () => {
+    it('sin invoice_id en el archivo: rechaza nombrando invoice_id; axios no se llama; el archivo lleva el detalle de nexgen', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, createCancelResponse()));
         const file = createCancelFile();
         delete file.invoice_id;
@@ -353,10 +353,10 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
         expect(caught.message).toContain('invoice_id');
         expect(caught.message).toContain('Para cancelar bajo el contrato v2');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
-    it('sin customer_id en el archivo: rechaza nombrando customer_id; axios no se llama; no se escribe archivo', async () => {
+    it('sin customer_id en el archivo: rechaza nombrando customer_id; axios no se llama; el archivo lleva el detalle de nexgen', async () => {
         axios.mockResolvedValue(fakes.createAxiosResponse(200, createCancelResponse()));
         const file = createCancelFile();
         delete file.customer_id;
@@ -367,7 +367,7 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('customer_id');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
     it('un archivo v1 (Committed: true, cartID) bajo cancel_tax --api-version=v2 rechaza con "parece del contrato v1"; axios no se llama', async () => {
@@ -379,7 +379,7 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('parece del contrato v1');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 
     it('readJsonFile devolviendo un arreglo bajo cancel_tax: rechaza con "no un arreglo"; axios no se llama', async () => {
@@ -391,17 +391,18 @@ describe('Recorrido completo — la cancelación aborta antes de la red (OPER-03
         expect(caught).not.toBeNull();
         expect(caught.message).toContain('no un arreglo');
         expect(axios).not.toHaveBeenCalled();
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectNexgenErrorResponseWritten(graph.fileManager.writeJsonFile);
     });
 });
 
 describe('Recorrido completo — el error de cancelación llega clasificado por status, citando al proveedor y con su request_id (SAFE-05, SAFE-06)', () => {
     const args = ['cancel_tax', 'c.json', '--api-version=v2', '--entity=USA'];
 
-    it('un 404 { error, message } con X-Request-Id lanza "Error HTTP 404", "no existe", el mensaje del proveedor y request_id=rid-cancel-404; no escribe archivo; la llave no sale', async () => {
+    it('un 404 { error, message } con X-Request-Id lanza "Error HTTP 404", "no existe", el mensaje del proveedor y request_id=rid-cancel-404; archiva el cuerpo del proveedor tal cual; la llave no sale', async () => {
+        const providerBody = { error: 'not_found', message: 'Invoice not found' };
         axios.mockResolvedValue(fakes.createAxiosResponse(
             404,
-            { error: 'not_found', message: 'Invoice not found' },
+            providerBody,
             { 'x-request-id': 'rid-cancel-404' }
         ));
         const graph = buildGraph(args, createCancelFile());
@@ -422,7 +423,7 @@ describe('Recorrido completo — el error de cancelación llega clasificado por 
         expect(axios).toHaveBeenCalledTimes(1);
         expect(axios.mock.calls[0][0].url).toBe(v2CancelUrl);
         expect(graph.logger.error.mock.calls.some(call => String(call[0]).includes('rid-cancel-404'))).toBe(true);
-        expect(graph.fileManager.writeJsonFile).not.toHaveBeenCalled();
+        fakes.expectProviderErrorResponseWritten(graph.fileManager.writeJsonFile, providerBody);
         capturedConsoleOutput().forEach(line => {
             expect(line).not.toContain(v2ApiKey);
         });

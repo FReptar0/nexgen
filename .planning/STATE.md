@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_plan
-stopped_at: Fase 2 cerrada — 02-VERIFICATION.md passed. El encargo del ERP está cubierto en código; falta la verificación en vivo (Fase 3, la ejecuta el área de ERP)
-last_updated: "2026-09-11T21:51:00.823Z"
-last_activity: 2026-09-11 -- Fase 2 completa y verificada (6/6, 467 pruebas); las tres operaciones funcionan contra v2. Fase 3 lista para planear
+stopped_at: Fase 2.1 cerrada — el archivo de respuesta se escribe también cuando falla (SAFE-07). Falta la verificación en vivo (Fase 3, la ejecuta el área de ERP)
+last_updated: "2026-10-01T18:00:00.000Z"
+last_activity: 2026-10-01 -- Fase 2.1 (SAFE-07) completa: un fallo v2 también escribe RESPONSE_. 486 pruebas verdes, 4 mutantes validados. Fase 3 lista para planear
 progress:
-  total_phases: 3
-  completed_phases: 2
+  total_phases: 4
+  completed_phases: 3
   total_plans: 8
   completed_plans: 8
-  percent: 67
+  percent: 75
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-10)
 
 **Core value:** El monto de impuesto que nexgen escribe en el archivo de respuesta tiene que ser el correcto, y no debe alterar estado en la API del proveedor sin que se haya pedido explícitamente.
-**Current focus:** Phase 02 — confirmar-cancelar-y-devolver-la-respuesta-ntegra
+**Current focus:** Phase 3 — verificación contra staging y corte documentado
 
 ## Current Position
 
 Phase: 3
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-11
+Last activity: 2026-10-01
 
-Progress: [███████░░░] 67% (2/3 fases)
+Progress: [████████░░] 75% (3/4 fases)
 
 ## Performance Metrics
 
@@ -111,6 +111,15 @@ Decisiones que afectan el trabajo actual:
 - [Phase 02]: createClient conserva la firma (logger, options) y los casos que cuentan llamadas al doble de configuración leen client.synexusConfig — El constructor ya expone la configuración; el criterio de a lo sumo dos construcciones directas del cliente en la prueba se cumple
 - [Phase 02]: La documentación de 02-04 se extendió sin reescribir: lo único falso era 'only get_tax is implemented' en README, reemplazado por la tabla de las tres operaciones — Los comandos y agentes ya describían v2 desde 02-01..02-03; RUNBOOK, ARCHITECTURE y HANDOFF siguen para la Fase 3 por decisión de la fase
 
+- [Phase 2.1]: Un fallo bajo v2 escribe el MISMO archivo `RESPONSE_<original>`, sin prefijo ni sufijo distinto — El área de ERP lee un solo archivo y sólo ése (*"igual igual, porque como nada más leo ese archivo"*, 1-oct 00:07:49); un nombre distinto lo dejaría sin encontrar, y no escribir nada lo dejaría leyendo el RESPONSE_ de una corrida anterior como si fuera de ahora
+- [Phase 2.1]: Cuando el proveedor respondió se archiva su cuerpo ÍNTEGRO, docs_url incluido — El filtro `_withoutDocsUrl` es sólo para consola y para el mensaje del Error; lo que se archiva no se recorta. Un cuerpo que no es JSON (el HTML de un gateway en un 502) se archiva como la cadena que es: es justo el caso que el ERP caza por su lado
+- [Phase 2.1]: Cuando el proveedor NO respondió se archiva un objeto propio de nexgen con `error.source: "nexgen"` — Deliberadamente no se parece a un cálculo (sin `totals`, sin `transaction`), que es lo que permite al ERP distinguirlo. Lleva la llave de idempotencia generada, para preguntarle al proveedor si la recibió
+- [Phase 2.1]: El alcance incluye los abortos ANTES de la red (validación, entidad sin resolver), no sólo los errores del proveedor — Desde el ERP el hueco es el mismo: mandó un archivo y no recibió respuesta. Es lo que pedía "a prueba de errores"
+- [Phase 2.1]: `_saveErrorResponse` NUNCA lanza; si escribir falla, el error que se propaga es el original — Enmascararlo convertiría "el proveedor devolvió 422" en "no se pudo escribir", que es el diagnóstico equivocado. El fallo de escritura se reporta aparte, en consola y en el log
+- [Phase 2.1]: El cuerpo del proveedor viaja en el Error como `providerResponseBody`, mutando el objeto en vez de envolverlo — Las pruebas de identidad (`rejects.toBe`) de las fases 1 y 2 siguen en pie sin tocarlas
+- [Phase 2.1]: Las 20 pruebas que afirmaban "no se escribe archivo" se actualizaron a afirmar QUÉ se escribe, no a borrarse — Afirman más que antes: identidad del cuerpo del proveedor (`toBe`, no `toEqual`) y forma del objeto de nexgen
+- [Phase 2.1]: v1 no cambió — un fallo bajo v1 sigue sin escribir nada (COMP-01), con dos pruebas dedicadas y un mutante que lo verifica
+
 ### Pending Todos
 
 [De .planning/todos/pending/ — ideas capturadas durante las sesiones]
@@ -156,6 +165,6 @@ Items reconocidos y arrastrados desde el cierre del milestone anterior:
 
 ## Session Continuity
 
-Last session: 2026-09-11T21:51:00.818Z
-Stopped at: Completed 02-04-PLAN.md
+Last session: 2026-10-01T18:00:00.000Z
+Stopped at: Completed Phase 2.1 (SAFE-07), ejecutada en línea sin plan
 Resume file: None

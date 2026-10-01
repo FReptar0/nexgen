@@ -140,9 +140,21 @@ class TaxCommandHandler {
      * @param {string[]} args - Argumentos de línea de comandos
      */
     async execute(args) {
+        // Fuera del try porque el catch los necesita: bajo v2, un fallo también
+        // tiene que dejar archivo de respuesta, y para eso hacen falta la ruta
+        // del archivo de entrada y el contrato. Si parseArguments es lo que
+        // falla, quedan en undefined y el catch no intenta escribir nada.
+        let operation;
+        let filePath;
+        let apiVersion;
+
         try {
             // 1. Parsear argumentos
-            const { operation, filePath, apiVersion, entityCode } = this.parseArguments(args);
+            const parsed = this.parseArguments(args);
+            operation = parsed.operation;
+            filePath = parsed.filePath;
+            apiVersion = parsed.apiVersion;
+            const entityCode = parsed.entityCode;
 
             // 2. Validar operación
             this.validator.validateOperation(operation);
@@ -185,8 +197,97 @@ class TaxCommandHandler {
         } catch (error) {
             // Manejo centralizado de errores
             this._handleError(error);
+
+            // Bajo v2, el ERP lee SIEMPRE el mismo archivo y sólo ése. Si una
+            // corrida fallida no deja nada, lee el RESPONSE_ de una corrida
+            // anterior y lo toma por bueno: peor que no tener archivo. Por eso
+            // el fallo también escribe, con el mismo nombre y sin prefijo
+            // distinto. v1 queda intacto (COMP-01).
+            if (apiVersion === 'v2' && typeof filePath === 'string' && filePath.length > 0) {
+                await this._saveErrorResponse(error, filePath, operation);
+            }
+
             throw error;
         }
+    }
+
+    /**
+     * Archiva el desenlace de una corrida v2 fallida en el MISMO archivo de
+     * respuesta de siempre: `RESPONSE_<nombre original>` en el directorio de
+     * salida, sin prefijo adicional ni sufijo. Es lo que pidió el área de ERP:
+     * su proceso abre ese archivo y sólo ése, y si lo que encuentra no es el
+     * cálculo que esperaba, lo detecta por su lado y levanta el error.
+     *
+     * NUNCA lanza. Si escribir falla —disco lleno, permisos, ruta inválida— lo
+     * reporta y regresa: el error que debe llegar al operador y al código de
+     * salida es el original, no el de la escritura. Enmascararlo convertiría
+     * "el proveedor devolvió 422" en "no se pudo escribir", que es el
+     * diagnóstico equivocado.
+     * @private
+     * @param {Error} error - Error que abortó la corrida
+     * @param {string} originalFilePath - Ruta del archivo de entrada
+     * @param {string} [operation] - Operación en curso, si se alcanzó a parsear
+     */
+    async _saveErrorResponse(error, originalFilePath, operation) {
+        try {
+            const body = this._errorResponseBodyFor(error, operation);
+            await this._saveResponse(body, originalFilePath);
+
+            const origen = error.providerResponded === true
+                ? 'la respuesta del proveedor, íntegra'
+                : 'un detalle generado por nexgen (el proveedor no respondió)';
+            console.log(`El archivo de respuesta quedó escrito con ${origen}.`);
+        } catch (saveError) {
+            const errorMsg = `No se pudo escribir el archivo de respuesta tras el fallo: ${saveError.message}`;
+            console.error(errorMsg);
+            this.logger.error(`${errorMsg} - Archivo de entrada: ${originalFilePath}`);
+            // Sin re-lanzar: el error original sigue su camino intacto
+        }
+    }
+
+    /**
+     * Decide QUÉ se escribe cuando la corrida v2 falló.
+     *
+     *   - El proveedor respondió (4xx o 5xx con cuerpo): su cuerpo tal cual,
+     *     sin tocar un byte. Es lo que pidió el área de ERP.
+     *   - El proveedor no respondió, o respondió sin cuerpo útil (timeout, red,
+     *     DNS, un 4xx vacío), o la corrida abortó antes de salir a la red
+     *     (validación, entidad sin resolver): un objeto propio de nexgen. No
+     *     se parece a un cálculo, que es justo lo que permite al ERP
+     *     distinguirlo.
+     *
+     * El objeto propio lleva sólo campos ya saneados: el mensaje del Error
+     * —que las capas construyen sin credenciales— y el código de red. Nunca el
+     * error completo, ni error.config, ni los headers: ahí viaja la llave
+     * (CFG-05).
+     * @private
+     * @param {Error} error - Error que abortó la corrida
+     * @param {string} [operation] - Operación en curso, si se alcanzó a parsear
+     * @returns {*} Cuerpo a escribir
+     */
+    _errorResponseBodyFor(error, operation) {
+        const body = error.providerResponseBody;
+        const providerSentSomething = error.providerResponded === true &&
+            body !== undefined &&
+            body !== null &&
+            body !== '';
+
+        if (providerSentSomething) {
+            return body;
+        }
+
+        return {
+            error: {
+                source: 'nexgen',
+                message: typeof error.message === 'string' ? error.message : String(error),
+                code: typeof error.code === 'string' ? error.code : null,
+                operation: typeof operation === 'string' ? operation : null,
+                provider_responded: error.providerResponded === true,
+                provider_request_id: typeof error.providerRequestId === 'string' ? error.providerRequestId : null,
+                request_id: typeof error.nexgenRequestId === 'string' ? error.nexgenRequestId : null,
+                timestamp: new Date().toISOString()
+            }
+        };
     }
 
     /**
@@ -256,7 +357,17 @@ class TaxCommandHandler {
         // 7. Emitir la petición con el cuerpo construido y la entidad resuelta. El
         //    valor de retorno viaja al paso 7 de execute, que guarda la respuesta
         //    con el mismo mecanismo de siempre: el contrato de archivos no cambia
-        return await this.synexusApiClient.makeRequest(operation, v2RequestBody, resolvedEntityCode);
+        try {
+            return await this.synexusApiClient.makeRequest(operation, v2RequestBody, resolvedEntityCode);
+        } catch (error) {
+            // La llave de idempotencia que generó nexgen, para que el archivo de
+            // error la lleve cuando el proveedor no respondió y no hay id suyo
+            // que citar. Se MUTA el error: la identidad se conserva.
+            if (typeof v2RequestBody.request_id === 'string' && v2RequestBody.request_id.length > 0) {
+                error.nexgenRequestId = v2RequestBody.request_id;
+            }
+            throw error;
+        }
     }
 
     /**

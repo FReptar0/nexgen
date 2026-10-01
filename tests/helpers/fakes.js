@@ -3,6 +3,7 @@
 // colaboradores por constructor, así que basta un objeto con los métodos que se
 // usan. Este archivo es el único ayudante común; todo lo demás va en sitio.
 const http = require('http');
+const path = require('path');
 
 /**
  * Doble del Logger (src/infrastructure/logger.js).
@@ -61,8 +62,59 @@ const createAxiosResponse = (status, data, headers) => {
     };
 };
 
+/**
+ * El contrato de archivo tras una corrida v2 FALLIDA: el área de ERP lee
+ * siempre `RESPONSE_<nombre original>` y sólo ése, así que un fallo también
+ * tiene que dejarlo escrito, con el mismo nombre y sin prefijo distinto.
+ * Afirma la forma común —una sola escritura, prefijo intacto— y devuelve el
+ * cuerpo para que cada caso afirme lo suyo.
+ * @param {Object} writeJsonFileMock - El jest.fn() de writeJsonFile del doble
+ * @returns {*} El cuerpo que se escribió
+ */
+const expectErrorResponseWritten = (writeJsonFileMock) => {
+    expect(writeJsonFileMock).toHaveBeenCalledTimes(1);
+    const [writtenPath, writtenData] = writeJsonFileMock.mock.calls[0];
+    expect(path.basename(writtenPath).startsWith('RESPONSE_')).toBe(true);
+    return writtenData;
+};
+
+/**
+ * Caso "el proveedor no respondió, o la corrida abortó antes de la red": el
+ * cuerpo es el objeto propio de nexgen, que NO se parece a un cálculo —es lo
+ * que permite al ERP distinguirlo— y nunca lleva la llave.
+ * @param {Object} writeJsonFileMock - El jest.fn() de writeJsonFile del doble
+ * @returns {Object} El cuerpo escrito, para afirmaciones adicionales
+ */
+const expectNexgenErrorResponseWritten = (writeJsonFileMock) => {
+    const written = expectErrorResponseWritten(writeJsonFileMock);
+
+    expect(written.error.source).toBe('nexgen');
+    expect(typeof written.error.message).toBe('string');
+    expect(written.error.message.length).toBeGreaterThan(0);
+    // No es un cálculo: ninguna de las llaves que el ERP espera de uno
+    expect(written.totals).toBeUndefined();
+    expect(written.transaction).toBeUndefined();
+
+    return written;
+};
+
+/**
+ * Caso "el proveedor sí respondió con cuerpo": se archiva TAL CUAL, por
+ * identidad. Un toEqual pasaría también con una copia recortada; toBe es lo
+ * que prueba que no se tocó un byte.
+ * @param {Object} writeJsonFileMock - El jest.fn() de writeJsonFile del doble
+ * @param {*} providerBody - El cuerpo exacto que devolvió el doble de axios
+ */
+const expectProviderErrorResponseWritten = (writeJsonFileMock, providerBody) => {
+    const written = expectErrorResponseWritten(writeJsonFileMock);
+    expect(written).toBe(providerBody);
+};
+
 module.exports = {
     createFakeLogger,
     createFakeConfig,
-    createAxiosResponse
+    createAxiosResponse,
+    expectErrorResponseWritten,
+    expectNexgenErrorResponseWritten,
+    expectProviderErrorResponseWritten
 };

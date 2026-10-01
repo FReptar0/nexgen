@@ -10,6 +10,7 @@
 const config = require('../src/config');
 const TaxValidator = require('../src/validators/taxValidator');
 const TaxCommandHandler = require('../src/cli/taxCommandHandler');
+const path = require('path');
 const fakes = require('./helpers/fakes');
 
 const usageMessage = 'Uso: node index.js <operacion> <ruta_del_archivo>\n' +
@@ -368,7 +369,13 @@ describe('Ramificación de execute() por contrato — antes de la validación de
         await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('cliente v2');
         await expect(handler.execute(['get_tax', 'a.json', '--api-version=v2'])).rejects.toThrow('index.js');
         expect(apiClient.makeRequest).not.toHaveBeenCalled();
-        expect(fileManager.writeJsonFile).not.toHaveBeenCalled();
+        // La guardia también deja archivo: el ERP lee el RESPONSE_ pase lo que
+        // pase. Son dos corridas en este caso, de ahí las dos escrituras
+        expect(fileManager.writeJsonFile).toHaveBeenCalledTimes(2);
+        fileManager.writeJsonFile.mock.calls.forEach(([writtenPath, writtenData]) => {
+            expect(path.basename(writtenPath).startsWith('RESPONSE_')).toBe(true);
+            expect(writtenData.error.source).toBe('nexgen');
+        });
     });
 
     it('bajo v2 resolveEntityCode recibe el cuerpo CRUDO: el apóstrofo viaja intacto, sin barra (WR-03)', async () => {
